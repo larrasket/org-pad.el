@@ -1,5 +1,4 @@
 *.elc
-OrgPad.swiftpm.zip
 /tests/fixtures/*.out
 .DS_Store
 OrgPad.swiftpm/.build/
