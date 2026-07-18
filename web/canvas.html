@@ -1,0 +1,1807 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0d10">
+<title>OrgPad — Draw</title>
+<style>
+  /* OrgPad web canvas — glassy, iPad-first drawing surface. */
+  :root {
+    --bg: #f2f3f5;
+    --bg-2: #e7e9ec;
+    --ink-default: #1c1c1e;
+    --panel: rgba(255,255,255,0.55);
+    --panel-stroke: rgba(255,255,255,0.7);
+    --panel-shadow: rgba(0,0,0,0.18);
+    --text: #14161a;
+    --text-dim: #5b6069;
+    --accent: #0a84ff;
+    --accent-ink: #ffffff;
+    --swatch-ring: rgba(0,0,0,0.25);
+    --hairline: rgba(0,0,0,0.10);
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+  }
+  html[data-theme="dark"] {
+    --bg: #0b0d10;
+    --bg-2: #14171c;
+    --ink-default: #f5f6f8;
+    --panel: rgba(28,30,36,0.55);
+    --panel-stroke: rgba(255,255,255,0.10);
+    --panel-shadow: rgba(0,0,0,0.5);
+    --text: #eef0f3;
+    --text-dim: #9aa0ac;
+    --accent: #0a84ff;
+    --accent-ink: #ffffff;
+    --swatch-ring: rgba(255,255,255,0.4);
+    --hairline: rgba(255,255,255,0.10);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    overflow: hidden; overscroll-behavior: none;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  #stage {
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--bg-2), var(--bg) 70%);
+  }
+  #board {
+    position: absolute; inset: 0;
+    display: block;
+    touch-action: none;
+  }
+
+  /* ---- Glass panel base ---- */
+  .glass {
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(24px) saturate(1.7);
+    backdrop-filter: blur(24px) saturate(1.7);
+    border: 1px solid var(--panel-stroke);
+    box-shadow:
+      0 8px 30px var(--panel-shadow),
+      inset 0 1px 0 rgba(255,255,255,0.25);
+    border-radius: 20px;
+  }
+
+  /* ---- Top-left brand / status ---- */
+  #topbar {
+    position: fixed;
+    top: calc(var(--safe-t) + 10px);
+    left: calc(var(--safe-l) + 10px);
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    z-index: 30;
+    font-weight: 600; letter-spacing: .2px;
+    color: var(--text);
+  }
+  #topbar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  #status { font-weight: 500; color: var(--text-dim); font-size: 13px; }
+
+  /* ---- Top-right actions ---- */
+  #actions {
+    position: fixed;
+    top: calc(var(--safe-t) + 10px);
+    right: calc(var(--safe-r) + 10px);
+    display: flex; gap: 8px; align-items: center;
+    padding: 7px;
+    z-index: 30;
+  }
+
+  /* ---- Bottom toolbar ---- */
+  #toolbar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(var(--safe-b) + 12px);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 9px;
+    z-index: 30;
+    max-width: calc(100vw - 20px);
+  }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .sep { width: 1px; align-self: stretch; margin: 4px 3px; background: var(--hairline); }
+
+  button.tool, button.act, .toggle {
+    -webkit-appearance: none; appearance: none;
+    min-width: 44px; min-height: 44px;
+    padding: 0 10px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text);
+    font: inherit; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    cursor: pointer;
+    transition: background .12s ease, transform .06s ease, color .12s ease;
+  }
+  button.tool svg, button.act svg { width: 22px; height: 22px; display: block; }
+  button.tool:active, button.act:active { transform: scale(.94); }
+  button.tool:hover, button.act:hover { background: rgba(127,127,127,0.14); }
+  button.tool[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
+    box-shadow: 0 3px 10px rgba(10,132,255,0.45);
+  }
+
+  button.act.primary {
+    background: var(--accent); color: var(--accent-ink);
+    padding: 0 18px;
+    box-shadow: 0 3px 12px rgba(10,132,255,0.5);
+  }
+  button.act.primary:hover { background: #2a95ff; }
+  button.act:disabled { opacity: .45; cursor: default; }
+
+  /* ---- Color palette ---- */
+  #palette { display: flex; align-items: center; gap: 6px; }
+  .swatch {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid var(--swatch-ring);
+    padding: 0; cursor: pointer;
+    position: relative;
+    transition: transform .08s ease;
+  }
+  .swatch:active { transform: scale(.9); }
+  .swatch[aria-pressed="true"] {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    transform: scale(1.08);
+  }
+  .swatch.custom { overflow: hidden; }
+  .swatch.custom input {
+    position: absolute; inset: -6px; width: 200%; height: 200%;
+    opacity: 0; cursor: pointer;
+  }
+  .swatch.custom::after {
+    content: "+"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; color: #fff;
+    mix-blend-mode: difference;
+  }
+
+  /* ---- Width slider ---- */
+  #widthWrap { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
+  #widthWrap .cap { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 26px; text-align: right; }
+  input[type=range].w {
+    -webkit-appearance: none; appearance: none;
+    width: 110px; height: 28px; background: transparent; cursor: pointer;
+  }
+  input[type=range].w::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 3px; background: var(--hairline);
+  }
+  input[type=range].w::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; margin-top: -8.5px;
+    border-radius: 50%; background: #fff;
+    border: 1px solid rgba(0,0,0,0.2);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  }
+
+  .toggle { gap: 8px; font-size: 13px; color: var(--text-dim); }
+  .toggle .pip {
+    width: 40px; height: 24px; border-radius: 12px;
+    background: var(--hairline); position: relative; transition: background .15s;
+    flex: 0 0 auto;
+  }
+  .toggle .pip::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4); transition: transform .15s;
+  }
+  .toggle[aria-pressed="true"] { color: var(--text); }
+  .toggle[aria-pressed="true"] .pip { background: var(--accent); }
+  .toggle[aria-pressed="true"] .pip::after { transform: translateX(16px); }
+
+  /* ---- Toast ---- */
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    top: calc(var(--safe-t) + 64px);
+    padding: 10px 16px; border-radius: 14px;
+    z-index: 40; font-weight: 600;
+    opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+    max-width: 80vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* zoom badge */
+  #zoomBadge {
+    position: fixed; right: calc(var(--safe-r) + 12px);
+    bottom: calc(var(--safe-b) + 92px);
+    padding: 6px 10px; border-radius: 12px;
+    font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim);
+    z-index: 25; opacity: 0; transition: opacity .3s;
+  }
+  #zoomBadge.show { opacity: 1; }
+
+  @media (max-width: 720px) {
+    #topbar .brand-text { display: none; }
+    input[type=range].w { width: 80px; }
+  }
+
+  /* ---- Bootstrap overlay screens (pairing / waiting / done) ---- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--bg-2), var(--bg) 70%);
+  }
+  .overlay[hidden] { display: none; }
+  .card {
+    width: min(380px, 100%);
+    padding: 32px 28px;
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  .card h1 {
+    margin: 0; font-size: 20px; font-weight: 700; color: var(--text);
+  }
+  .card p.hint {
+    margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.4;
+  }
+  .card .origin {
+    font-size: 12px; color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+  }
+  #pairCode {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; box-sizing: border-box;
+    font: 700 28px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    letter-spacing: 8px; text-align: center;
+    padding: 12px 8px 12px 16px;
+    border-radius: 14px; border: 1px solid var(--hairline);
+    background: rgba(127,127,127,0.10); color: var(--text);
+    -webkit-text-security: none;
+  }
+  #pairCode:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card .err {
+    min-height: 18px; font-size: 13px; font-weight: 600; color: #ff453a;
+  }
+  .card button.act.primary { width: 100%; padding: 12px 18px; }
+  .card button.act { width: 100%; }
+
+  .spinner {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 3px solid var(--hairline);
+    border-top-color: var(--accent);
+    animation: orgpad-spin 0.9s linear infinite;
+  }
+  @keyframes orgpad-spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="board"></canvas>
+  </div>
+
+  <div id="topbar" class="glass">
+    <span class="dot"></span>
+    <span class="brand-text">OrgPad</span>
+    <span id="status">ready</span>
+  </div>
+
+  <div id="actions" class="glass">
+    <button class="act" id="btnTheme" title="Toggle light/dark" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+    </button>
+    <button class="act" id="btnClear" title="Clear all" aria-label="Clear">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+    </button>
+    <button class="act primary" id="btnDone">Done</button>
+    <button class="act" id="btnCancel" title="Cancel">Cancel</button>
+  </div>
+
+  <div id="toolbar" class="glass">
+    <div class="group" id="tools">
+      <button class="tool" data-tool="pen" aria-pressed="true" title="Pen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5zM2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      </button>
+      <button class="tool" data-tool="marker" aria-pressed="false" title="Marker">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 16l8-8 4 4-8 8H6v-4z"/></svg>
+      </button>
+      <button class="tool" data-tool="pencil" aria-pressed="false" title="Pencil">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3zM18 13l-6-6M2 2l7.586 7.586"/></svg>
+      </button>
+      <button class="tool" data-tool="highlighter" aria-pressed="false" title="Highlighter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-4 4v3h3l4-4M15 5l4 4-8 8-4-4 8-8z"/></svg>
+      </button>
+      <button class="tool" data-tool="eraser" aria-pressed="false" title="Eraser (stroke)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16a2 2 0 0 1 0-3l9-9a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-7 7"/></svg>
+      </button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group" id="shapes">
+      <button class="tool" data-tool="line" aria-pressed="false" title="Line">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20L20 4"/></svg>
+      </button>
+      <button class="tool" data-tool="rect" aria-pressed="false" title="Rectangle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>
+      </button>
+      <button class="tool" data-tool="ellipse" aria-pressed="false" title="Ellipse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>
+      </button>
+      <button class="tool" data-tool="arrow" aria-pressed="false" title="Arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L20 4M20 4h-7M20 4v7"/></svg>
+      </button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group" id="palette"></div>
+
+    <div class="sep"></div>
+
+    <div id="widthWrap" class="group">
+      <input type="range" class="w" id="width" min="1" max="40" step="0.5" value="4">
+      <span class="cap" id="widthCap">4</span>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group">
+      <button class="act" id="btnUndo" title="Undo" aria-label="Undo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>
+      </button>
+      <button class="act" id="btnRedo" title="Redo" aria-label="Redo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg>
+      </button>
+      <button class="act" id="btnSnap" title="Snap last freehand stroke to a shape" aria-label="Snap to shape">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v5h5"/></svg>
+      </button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group">
+      <button class="toggle" id="tglPen" aria-pressed="false" title="Pen-only (reject finger)">
+        <span class="pip"></span><span>Pen only</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="zoomBadge">100%</div>
+  <div id="toast" class="glass"></div>
+
+  <!-- ---- Bootstrap overlay screens (receiver mode) ---- -->
+  <div id="screenPairing" class="overlay" hidden>
+    <div class="card glass">
+      <h1>Pair with Emacs</h1>
+      <input id="pairCode" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+             autocomplete="one-time-code" placeholder="000000" aria-label="6-digit pairing code">
+      <button class="act primary" id="btnPair">Pair</button>
+      <p class="err" id="pairError"></p>
+      <p class="hint">Enter the 6-digit code from M-x org-pad-setup in Emacs.</p>
+    </div>
+  </div>
+
+  <div id="screenWaiting" class="overlay" hidden>
+    <div class="card glass">
+      <div class="spinner"></div>
+      <h1>Waiting for a drawing…</h1>
+      <p class="origin" id="waitingOrigin"></p>
+      <button class="act" id="btnUnpair">Unpair</button>
+    </div>
+  </div>
+
+  <div id="screenDone" class="overlay" hidden>
+    <div class="card glass">
+      <h1 id="doneTitle">Done</h1>
+      <p class="hint" id="doneHint">This tab was opened for one figure. You can close it.</p>
+    </div>
+  </div>
+
+<!-- Pure core (no DOM, no window) — shared with verify.mjs, which extracts
+     this script verbatim and unit-tests it in Node. -->
+<script id="orgpad-core">
+/* CORE-START */
+"use strict";
+var OrgPadCore = (function () {
+
+  // ---- Format constants (must match elisp orPd chunk versioning) ----
+  // Chunk format byte 0x01 = Apple PKDrawing (native app).
+  // Chunk format byte 0x02 = web-canvas JSON strokes (this app).
+  var WEB_FORMAT = "web";      // value sent in /result JSON "format" field
+  var SCHEMA = 2;              // web-JSON schema version (payload.v)
+
+  // ---- Export geometry (mirrors ExportGeometry.exportRect in Swift) ----
+  // Union of drawing bounds inset by -PAD, minimum MIN_W x MIN_H, centered.
+  var PAD = 20, MIN_W = 200, MIN_H = 150;
+
+  // strokeBounds: bounding box (in canvas/world coords) of a list of strokes.
+  // Returns null when there is nothing to bound.
+  function strokeBounds(strokes) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    var any = false;
+    for (var i = 0; i < strokes.length; i++) {
+      var s = strokes[i];
+      var hw = halfWidthForBounds(s);       // account for stroke thickness
+      var pts = s.points || [];
+      for (var j = 0; j < pts.length; j++) {
+        var x = pts[j][0], y = pts[j][1];
+        if (x - hw < minX) minX = x - hw;
+        if (y - hw < minY) minY = y - hw;
+        if (x + hw > maxX) maxX = x + hw;
+        if (y + hw > maxY) maxY = y + hw;
+        any = true;
+      }
+      // shapes carry explicit geometry too
+      if (s.shape) {
+        var b = shapeBBox(s);
+        if (b) {
+          if (b.x - hw < minX) minX = b.x - hw;
+          if (b.y - hw < minY) minY = b.y - hw;
+          if (b.x + b.w + hw > maxX) maxX = b.x + b.w + hw;
+          if (b.y + b.h + hw > maxY) maxY = b.y + b.h + hw;
+          any = true;
+        }
+      }
+    }
+    if (!any) return null;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
+  function halfWidthForBounds(s) {
+    var w = (s && typeof s.width === "number") ? s.width : 4;
+    // highlighter/marker are wide; use the nominal width as the half-extent
+    // (a slight over-estimate keeps ink from clipping at the crop edge).
+    return Math.max(1, w);
+  }
+
+  function shapeBBox(s) {
+    var a = s.a, b = s.b;
+    if (!a || !b) return null;
+    var x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+    return { x: x, y: y, w: Math.abs(b[0] - a[0]), h: Math.abs(b[1] - a[1]) };
+  }
+
+  // exportRect: given a raw bounds box (or null), produce the crop rect.
+  // A null/empty bounds yields the default MIN_W x MIN_H rect at the origin.
+  function exportRect(bounds) {
+    if (!bounds) return { x: 0, y: 0, w: MIN_W, h: MIN_H };
+    var x = bounds.x - PAD, y = bounds.y - PAD;
+    var w = bounds.w + 2 * PAD, h = bounds.h + 2 * PAD;
+    if (w < MIN_W || h < MIN_H) {
+      var nw = Math.max(w, MIN_W), nh = Math.max(h, MIN_H);
+      var cx = x + w / 2, cy = y + h / 2;
+      x = cx - nw / 2; y = cy - nh / 2; w = nw; h = nh;
+    }
+    return { x: x, y: y, w: w, h: h };
+  }
+
+  // Convenience: bounds+rect for a whole drawing's strokes.
+  function exportRectForStrokes(strokes) {
+    return exportRect(strokeBounds(strokes));
+  }
+
+  // ---- (De)serialization: drawing <-> compact JSON ----
+  // Drawing model:
+  //   { v: SCHEMA, w: <canvasW>, h: <canvasH>, bg: "transparent"|"light"|"dark",
+  //     strokes: [ Stroke, ... ] }
+  // Freehand Stroke:
+  //   { tool, color, width, points: [[x,y,p], ...] }
+  // Shape Stroke:
+  //   { tool, color, width, shape: "line"|"rect"|"ellipse"|"arrow", a:[x,y], b:[x,y] }
+  function serialize(model) {
+    var out = { v: SCHEMA, w: model.w | 0, h: model.h | 0,
+                bg: model.bg || "transparent", strokes: [] };
+    for (var i = 0; i < model.strokes.length; i++) {
+      out.strokes.push(serializeStroke(model.strokes[i]));
+    }
+    return JSON.stringify(out);
+  }
+
+  function serializeStroke(s) {
+    if (s.shape) {
+      return { tool: s.tool, color: s.color, width: round2(s.width),
+               shape: s.shape, a: roundPt2(s.a), b: roundPt2(s.b) };
+    }
+    var pts = [];
+    for (var i = 0; i < s.points.length; i++) {
+      var p = s.points[i];
+      pts.push([round2(p[0]), round2(p[1]),
+                Math.max(0, Math.min(1, round3(p[2] == null ? 0.5 : p[2])))]);
+    }
+    return { tool: s.tool, color: s.color, width: round2(s.width), points: pts };
+  }
+
+  function deserialize(json) {
+    var obj = (typeof json === "string") ? JSON.parse(json) : json;
+    if (!obj || typeof obj !== "object") throw new Error("bad drawing JSON");
+    var strokes = [];
+    var arr = obj.strokes || [];
+    for (var i = 0; i < arr.length; i++) {
+      strokes.push(deserializeStroke(arr[i]));
+    }
+    return {
+      v: obj.v || 1,
+      w: obj.w | 0, h: obj.h | 0,
+      bg: obj.bg || "transparent",
+      strokes: strokes
+    };
+  }
+
+  function deserializeStroke(s) {
+    var tool = s.tool || "pen";
+    var color = s.color || "#1c1c1e";
+    var width = (typeof s.width === "number") ? s.width : 4;
+    if (s.shape) {
+      return { tool: tool, color: color, width: width,
+               shape: s.shape, a: [s.a[0], s.a[1]], b: [s.b[0], s.b[1]] };
+    }
+    var pts = [];
+    var src = s.points || [];
+    for (var i = 0; i < src.length; i++) {
+      var p = src[i];
+      pts.push([p[0], p[1], (p.length > 2 && p[2] != null) ? p[2] : 0.5]);
+    }
+    return { tool: tool, color: color, width: width, points: pts };
+  }
+
+  function round2(n) { return Math.round(n * 100) / 100; }
+  function round3(n) { return Math.round(n * 1000) / 1000; }
+  function roundPt2(p) { return [round2(p[0]), round2(p[1])]; }
+
+  // ---- base64 of a JSON string (UTF-8 safe), env-agnostic ----
+  // Uses Buffer under Node, btoa+TextEncoder in a browser.
+  function utf8ToBase64(str) {
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(str, "utf-8").toString("base64");
+    }
+    var bytes = new TextEncoder().encode(str);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function base64ToUtf8(b64) {
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(b64, "base64").toString("utf-8");
+    }
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  // Build the exact /result payload body object the elisp server receives.
+  // pngBase64 is produced by canvas.toDataURL (caller strips the prefix).
+  function buildResultBody(sessionID, pngBase64, drawingModel) {
+    return {
+      session_id: sessionID,
+      png: pngBase64,
+      drawing: utf8ToBase64(serialize(drawingModel)),
+      format: WEB_FORMAT
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // ---- RECEIVER bootstrap: pure config / request / parse helpers ----
+  // ---------------------------------------------------------------------
+  // These are deliberately DOM-free so verify.mjs can unit-test the exact
+  // decision logic that the browser boot path exercises.
+
+  var DEFAULT_PATHS = {
+    token_header: "X-OrgPad-Token",
+    pair_path: "/pair",
+    session_path: "/session",
+    result_path: "/result",
+    cancel_path: "/cancel"
+  };
+
+  // resolveConfig: given the raw (possibly empty/partial) server-injected
+  // config object and a token read from localStorage (or null), decide which
+  // screen to boot into and normalize every field the UI needs.
+  //
+  // Screen decision:
+  //   - cfg.session_id present  -> "drawing" (existing one-shot per-session
+  //     path: this tab was opened by the host specifically for one figure).
+  //   - else, a token available (cfg.token OR storedToken) -> "waiting"
+  //     (receiver mode, long-poll for the next session).
+  //   - else -> "pairing" (receiver mode, no token yet).
+  //
+  // Returns a fully-populated plain object; never throws on a missing/empty
+  // cfg (every field defaults sanely).
+  function resolveConfig(cfg, storedToken) {
+    cfg = cfg || {};
+    var session_id = cfg.session_id || null;
+    var cfgToken = cfg.token || null;
+    var token = cfgToken || storedToken || null;
+
+    var screen;
+    if (session_id) screen = "drawing";
+    else if (token) screen = "waiting";
+    else screen = "pairing";
+
+    return {
+      screen: screen,
+      session_id: session_id,
+      token: token,
+      mode: cfg.mode || "new",
+      name: cfg.name || "",
+      drawing: (cfg.drawing !== undefined && cfg.drawing !== null) ? cfg.drawing : null,
+      background: cfg.background || "transparent",
+      token_header: cfg.token_header || DEFAULT_PATHS.token_header,
+      pair_path: cfg.pair_path || DEFAULT_PATHS.pair_path,
+      session_path: cfg.session_path || DEFAULT_PATHS.session_path,
+      result_path: cfg.result_path || cfg.resultUrl || DEFAULT_PATHS.result_path,
+      cancel_path: cfg.cancel_path || DEFAULT_PATHS.cancel_path
+    };
+  }
+
+  // pairRequestBody: exact JSON body for POST /pair. No auth header — the
+  // pairing code itself is the gate.
+  function pairRequestBody(code) {
+    return { code: String(code == null ? "" : code) };
+  }
+
+  // parseSessionResponse: normalize a GET /session 200 payload (object or
+  // JSON string) into { sessionID, mode, name, background, restoreJSON }.
+  // restoreJSON is the base64-decoded web-JSON stroke model STRING (ready for
+  // OrgPadCore.deserialize), or null when there is nothing to restore (a
+  // "new" session, or a "pkdrawing"-format edit this client can't restore).
+  function parseSessionResponse(json) {
+    var obj = (typeof json === "string") ? JSON.parse(json) : json;
+    if (!obj || typeof obj !== "object") throw new Error("bad session JSON");
+    var mode = obj.mode || "new";
+    var format = obj.format || WEB_FORMAT;
+    var restoreJSON = null;
+    if (mode === "edit" && obj.drawing && format === WEB_FORMAT) {
+      restoreJSON = base64ToUtf8(obj.drawing);
+    }
+    return {
+      sessionID: obj.session_id,
+      mode: mode,
+      name: obj.name || "",
+      background: obj.background || "transparent",
+      format: format,
+      restoreJSON: restoreJSON
+    };
+  }
+
+  // ---- Backoff: 1,2,4,8,16,30,30,... seconds, for the receiver's long-poll
+  // retry-on-network-error loop. Pure/stateful-but-isolated so it is trivially
+  // unit-testable without timers.
+  var BACKOFF_SEQUENCE = [1, 2, 4, 8, 16, 30];
+  function makeBackoff() {
+    var i = 0;
+    return {
+      // next(): advance and return the next delay (seconds), capped at 30.
+      next: function () {
+        var v = BACKOFF_SEQUENCE[Math.min(i, BACKOFF_SEQUENCE.length - 1)];
+        i++;
+        return v;
+      },
+      reset: function () { i = 0; }
+    };
+  }
+
+  // ---- Shape-snapping classifier ----
+  // Input: array of [x,y] (or [x,y,p]) points from ONE freehand stroke.
+  // Output: { shape: "line"|"rect"|"ellipse"|"triangle"|"arrow", a, b, score }
+  //         or null if it doesn't look like a clean shape.
+  // Heuristic, self-contained, no external deps. Tuned for forgiving snapping.
+  function classifyShape(points) {
+    if (!points || points.length < 3) return null;
+    var pts = points.map(function (p) { return [p[0], p[1]]; });
+    var n = pts.length;
+
+    var bb = pointsBBox(pts);
+    var diag = Math.hypot(bb.w, bb.h);
+    if (diag < 12) return null;                     // too small / a dot
+
+    var pathLen = polylineLength(pts);
+    var start = pts[0], end = pts[n - 1];
+    var gap = dist(start, end);
+    var closed = gap < 0.22 * Math.max(diag, 1);
+
+    // --- straightness test => line/arrow ---
+    var maxDev = maxDeviationFromChord(pts);
+    var chord = dist(start, end);
+    if (!closed && chord > 0.35 * pathLen && maxDev < 0.14 * Math.max(chord, 1)) {
+      // it's basically straight
+      return { shape: "line", a: start, b: end, score: 1 - maxDev / Math.max(chord, 1) };
+    }
+
+    if (!closed) return null;   // open, non-straight => leave as freehand
+
+    // --- closed shapes: fit each model, pick the smallest-residual one ---
+    // Residuals are mean point-to-outline distance normalized by the bbox
+    // diagonal, so they are scale-independent and directly comparable.
+    var diagN = Math.max(diag, 1);
+    var eRect = meanDistToRect(pts, bb) / diagN;
+    var eEll  = meanDistToEllipse(pts, bb) / diagN;
+    var tri   = triangleModel(pts, bb);
+    var eTri  = tri ? tri.err / diagN : Infinity;
+
+    var best = { shape: "rect", err: eRect };
+    if (eEll < best.err) best = { shape: "ellipse", err: eEll };
+    if (eTri < best.err) best = { shape: "triangle", err: eTri };
+
+    // Reject when even the best model fits poorly (keep it freehand).
+    if (best.err > 0.08) return null;
+
+    var res = { shape: best.shape, a: [bb.x, bb.y], b: [bb.x + bb.w, bb.y + bb.h],
+                score: 1 - best.err };
+    if (best.shape === "triangle" && tri) res.corners = tri.corners;
+    return res;
+  }
+
+  // Mean distance from each point to the nearest edge of the axis-aligned bbox.
+  function meanDistToRect(pts, bb) {
+    var x0 = bb.x, y0 = bb.y, x1 = bb.x + bb.w, y1 = bb.y + bb.h;
+    var sum = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var x = pts[i][0], y = pts[i][1];
+      // distance to the rectangle *outline* (perimeter), for a point assumed
+      // to lie on/near it: min distance to any of the 4 edges.
+      var d = Math.min(
+        distPointSeg(x, y, x0, y0, x1, y0),
+        distPointSeg(x, y, x1, y0, x1, y1),
+        distPointSeg(x, y, x1, y1, x0, y1),
+        distPointSeg(x, y, x0, y1, x0, y0));
+      sum += d;
+    }
+    return sum / pts.length;
+  }
+  // Mean radial distance from the fitted ellipse (bbox-inscribed).
+  function meanDistToEllipse(pts, bb) {
+    var cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+    var rx = bb.w / 2 || 1, ry = bb.h / 2 || 1;
+    var sum = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var nx = (pts[i][0] - cx) / rx, ny = (pts[i][1] - cy) / ry;
+      var r = Math.hypot(nx, ny);
+      // approx geometric distance: |r-1| scaled back by the mean radius
+      sum += Math.abs(r - 1) * ((rx + ry) / 2);
+    }
+    return sum / pts.length;
+  }
+  // Fit a triangle by taking the 3 points furthest apart, return mean residual.
+  function triangleModel(pts, bb) {
+    if (pts.length < 3) return null;
+    // Farthest pair
+    var A = pts[0], B = pts[0], dmax = 0;
+    for (var i = 0; i < pts.length; i++)
+      for (var j = i + 1; j < pts.length; j++) {
+        var d = dist(pts[i], pts[j]);
+        if (d > dmax) { dmax = d; A = pts[i]; B = pts[j]; }
+      }
+    // Point farthest from line AB = apex
+    var Cpt = A, cmax = -1;
+    for (var k = 0; k < pts.length; k++) {
+      var dd = distPointSeg(pts[k][0], pts[k][1], A[0], A[1], B[0], B[1]);
+      if (dd > cmax) { cmax = dd; Cpt = pts[k]; }
+    }
+    if (cmax < 0.12 * Math.hypot(bb.w, bb.h)) return null;   // degenerate/flat
+    var corners = [A, B, Cpt];
+    var sum = 0;
+    for (var m = 0; m < pts.length; m++) {
+      var p = pts[m];
+      var e = Math.min(
+        distPointSeg(p[0], p[1], A[0], A[1], B[0], B[1]),
+        distPointSeg(p[0], p[1], B[0], B[1], Cpt[0], Cpt[1]),
+        distPointSeg(p[0], p[1], Cpt[0], Cpt[1], A[0], A[1]));
+      sum += e;
+    }
+    return { corners: corners, err: sum / pts.length };
+  }
+  function distPointSeg(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var l2 = dx * dx + dy * dy;
+    if (l2 === 0) return Math.hypot(px - ax, py - ay);
+    var t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  function pointsBBox(pts) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      var x = pts[i][0], y = pts[i][1];
+      if (x < minX) minX = x; if (y < minY) minY = y;
+      if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+  function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+  function polylineLength(pts) {
+    var L = 0; for (var i = 1; i < pts.length; i++) L += dist(pts[i - 1], pts[i]); return L;
+  }
+  function maxDeviationFromChord(pts) {
+    var a = pts[0], b = pts[pts.length - 1];
+    var dx = b[0] - a[0], dy = b[1] - a[1];
+    var len = Math.hypot(dx, dy) || 1;
+    var maxd = 0;
+    for (var i = 1; i < pts.length - 1; i++) {
+      var d = Math.abs((pts[i][0] - a[0]) * dy - (pts[i][1] - a[1]) * dx) / len;
+      if (d > maxd) maxd = d;
+    }
+    return maxd;
+  }
+  // ---- Stroke smoothing: Chaikin corner-cutting (de-jitter) ----
+  // Keeps endpoints, carries pressure along. Returns a new points array.
+  function smoothStroke(points, iterations) {
+    iterations = iterations || 1;
+    var pts = points.slice();
+    for (var it = 0; it < iterations; it++) {
+      if (pts.length < 3) break;
+      var out = [pts[0]];
+      for (var i = 0; i < pts.length - 1; i++) {
+        var p = pts[i], q = pts[i + 1];
+        var qp = [0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1],
+                  0.75 * v(p) + 0.25 * v(q)];
+        var rp = [0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1],
+                  0.25 * v(p) + 0.75 * v(q)];
+        out.push(qp, rp);
+      }
+      out.push(pts[pts.length - 1]);
+      pts = out;
+    }
+    return pts;
+    function v(pt) { return pt.length > 2 && pt[2] != null ? pt[2] : 0.5; }
+  }
+
+  return {
+    WEB_FORMAT: WEB_FORMAT, SCHEMA: SCHEMA, PAD: PAD, MIN_W: MIN_W, MIN_H: MIN_H,
+    strokeBounds: strokeBounds, exportRect: exportRect,
+    exportRectForStrokes: exportRectForStrokes,
+    serialize: serialize, deserialize: deserialize,
+    utf8ToBase64: utf8ToBase64, base64ToUtf8: base64ToUtf8,
+    buildResultBody: buildResultBody,
+    classifyShape: classifyShape, smoothStroke: smoothStroke,
+    DEFAULT_PATHS: DEFAULT_PATHS,
+    resolveConfig: resolveConfig,
+    pairRequestBody: pairRequestBody,
+    parseSessionResponse: parseSessionResponse,
+    BACKOFF_SEQUENCE: BACKOFF_SEQUENCE,
+    makeBackoff: makeBackoff
+  };
+})();
+
+if (typeof module !== "undefined" && module.exports) { module.exports = OrgPadCore; }
+/* CORE-END */
+</script>
+
+<!-- UI / DOM layer (browser only). Uses OrgPadCore for all math. -->
+<script>
+(function () {
+  "use strict";
+  var C = OrgPadCore;
+
+  // ---------- config injected by the server ----------
+  // The elisp server may inject a config script tag (window.ORGPAD_CONFIG = {...})
+  // BEFORE this script, OR pass ?session=&token=&mode=  in the URL. ALL fields
+  // are optional — C.resolveConfig() supplies defaults for an empty/absent
+  // config so the page can boot as a bare RECEIVER (no session_id, no token).
+  // Config fields: { token_header, pair_path, session_path, result_path,
+  //                  cancel_path, session_id, token, mode:"new"|"edit", name,
+  //                  drawing: <base64 web-JSON | null>, background }
+  var rawCfg = window.ORGPAD_CONFIG || {};
+  var qs = new URLSearchParams(location.search);
+  // URL query params are folded in as fallbacks (used by the legacy
+  // /canvas?session=&token= top-level navigation, which can't set headers).
+  rawCfg = {
+    token_header: rawCfg.token_header,
+    pair_path: rawCfg.pair_path,
+    session_path: rawCfg.session_path,
+    result_path: rawCfg.result_path,
+    cancel_path: rawCfg.cancel_path,
+    session_id: rawCfg.session_id || qs.get("session") || qs.get("session_id") || null,
+    token: rawCfg.token || qs.get("token") || null,
+    mode: rawCfg.mode || qs.get("mode") || "new",
+    name: rawCfg.name || qs.get("name") || "",
+    drawing: (rawCfg.drawing !== undefined && rawCfg.drawing !== null) ? rawCfg.drawing : qs.get("drawing"),
+    background: rawCfg.background || qs.get("background") || "transparent",
+    resultUrl: rawCfg.resultUrl // legacy alias, honored by resolveConfig via result_path fallback
+  };
+
+  var TOKEN_KEY = "orgpad.token";
+  function readStoredToken() {
+    try { return window.localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+  }
+  function writeStoredToken(tok) {
+    try {
+      if (tok) window.localStorage.setItem(TOKEN_KEY, tok);
+      else window.localStorage.removeItem(TOKEN_KEY);
+    } catch (e) { /* non-fatal (private mode / disabled storage) */ }
+  }
+
+  var CONFIG = C.resolveConfig(rawCfg, readStoredToken());
+  CONFIG.resultUrl = CONFIG.result_path; // keep the pre-existing name used below
+
+  // The bearer token rides in the /canvas?token= URL for the initial top-level
+  // navigation (a browser can't set a header there). Strip it from the address
+  // bar / history after reading it so it doesn't linger or leak via Referer.
+  (function () {
+    try {
+      var u = new URL(location.href);
+      if (u.searchParams.has("token")) {
+        u.searchParams.delete("token");
+        history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+      }
+    } catch (e) { /* non-fatal */ }
+  })();
+
+  // ---------- state ----------
+  var board = document.getElementById("board");
+  var ctx = board.getContext("2d");
+  var DPR = Math.max(1, window.devicePixelRatio || 1);
+
+  var state = {
+    strokes: [],          // committed strokes (world coords)
+    redo: [],             // undone strokes
+    current: null,        // in-progress stroke
+    tool: "pen",
+    color: "#1c1c1e",
+    width: 4,
+    penOnly: false,
+    // view transform: world = (screen - t)/scale
+    scale: 1, tx: 0, ty: 0,
+    theme: "light"
+  };
+
+  // Tool visual params
+  function toolStyle(tool) {
+    switch (tool) {
+      case "marker":      return { alpha: 0.55, cap: "round", join: "round", widthMul: 2.4, comp: "source-over", jitter: 0 };
+      case "highlighter": return { alpha: 0.35, cap: "butt",  join: "miter", widthMul: 6.0, comp: "multiply",   jitter: 0 };
+      case "pencil":      return { alpha: 0.9,  cap: "round", join: "round", widthMul: 1.0, comp: "source-over", jitter: 0.6 };
+      case "pen":
+      default:            return { alpha: 1.0,  cap: "round", join: "round", widthMul: 1.0, comp: "source-over", jitter: 0 };
+    }
+  }
+
+  // ---------- theme ----------
+  function applyTheme(t) {
+    state.theme = t;
+    document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+    // default ink color follows theme unless user picked a custom/explicit one
+    render();
+  }
+  function themeInkColor() {
+    return state.theme === "dark" ? "#f5f6f8" : "#1c1c1e";
+  }
+
+  // ---------- coordinate transforms ----------
+  function screenToWorld(sx, sy) {
+    return [(sx - state.tx) / state.scale, (sy - state.ty) / state.scale];
+  }
+
+  // ---------- sizing ----------
+  function resize() {
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    var w = window.innerWidth, h = window.innerHeight;
+    board.width = Math.round(w * DPR);
+    board.height = Math.round(h * DPR);
+    board.style.width = w + "px";
+    board.style.height = h + "px";
+    render();
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------- rendering ----------
+  function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, board.width, board.height);
+    // apply DPR + view transform
+    ctx.setTransform(DPR * state.scale, 0, 0, DPR * state.scale,
+                     DPR * state.tx, DPR * state.ty);
+    for (var i = 0; i < state.strokes.length; i++) drawStroke(ctx, state.strokes[i]);
+    if (state.current) drawStroke(ctx, state.current);
+  }
+
+  function drawStroke(g, s) {
+    if (s.shape) return drawShape(g, s);
+    var pts = s.points;
+    if (!pts || pts.length === 0) return;
+    var st = toolStyle(s.tool);
+    g.save();
+    g.globalCompositeOperation = st.comp;
+    g.globalAlpha = st.alpha;
+    g.strokeStyle = s.color;
+    g.fillStyle = s.color;
+    g.lineCap = st.cap;
+    g.lineJoin = st.join;
+
+    if (pts.length === 1) {
+      var r = (s.width * st.widthMul) / 2;
+      g.beginPath(); g.arc(pts[0][0], pts[0][1], Math.max(0.5, r), 0, Math.PI * 2); g.fill();
+      g.restore(); return;
+    }
+
+    // variable width: draw segment-by-segment with pressure-scaled width
+    for (var i = 1; i < pts.length; i++) {
+      var a = pts[i - 1], b = pts[i];
+      var pa = a[2] == null ? 0.5 : a[2], pb = b[2] == null ? 0.5 : b[2];
+      var wa = s.width * st.widthMul * pressureScale(pa);
+      var wb = s.width * st.widthMul * pressureScale(pb);
+      g.lineWidth = Math.max(0.4, (wa + wb) / 2);
+      g.beginPath();
+      g.moveTo(a[0], a[1]);
+      // quadratic midpoint smoothing for silky joins
+      var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      g.quadraticCurveTo(a[0], a[1], mx, my);
+      g.lineTo(b[0], b[1]);
+      g.stroke();
+    }
+    g.restore();
+  }
+  function pressureScale(p) { return 0.35 + 0.65 * p; }
+
+  function drawShape(g, s) {
+    var st = toolStyle(s.tool);
+    g.save();
+    g.globalCompositeOperation = st.comp;
+    g.globalAlpha = st.alpha;
+    g.strokeStyle = s.color;
+    g.fillStyle = s.color;
+    g.lineWidth = Math.max(0.5, s.width * st.widthMul);
+    g.lineCap = "round"; g.lineJoin = "round";
+    var a = s.a, b = s.b;
+    var x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+    var w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
+    g.beginPath();
+    if (s.shape === "line") {
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    } else if (s.shape === "rect") {
+      g.strokeRect(x, y, w, h);
+    } else if (s.shape === "ellipse") {
+      g.ellipse(x + w / 2, y + h / 2, Math.max(0.5, w / 2), Math.max(0.5, h / 2), 0, 0, Math.PI * 2);
+      g.stroke();
+    } else if (s.shape === "triangle") {
+      var cs = s.corners;
+      if (cs && cs.length >= 3) {
+        g.moveTo(cs[0][0], cs[0][1]); g.lineTo(cs[1][0], cs[1][1]); g.lineTo(cs[2][0], cs[2][1]); g.closePath();
+      } else {
+        g.moveTo(x + w / 2, y); g.lineTo(x + w, y + h); g.lineTo(x, y + h); g.closePath();
+      }
+      g.stroke();
+    } else if (s.shape === "arrow") {
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      // arrowhead
+      var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      var head = Math.max(10, s.width * st.widthMul * 3);
+      g.beginPath();
+      g.moveTo(b[0], b[1]);
+      g.lineTo(b[0] - head * Math.cos(ang - 0.4), b[1] - head * Math.sin(ang - 0.4));
+      g.moveTo(b[0], b[1]);
+      g.lineTo(b[0] - head * Math.cos(ang + 0.4), b[1] - head * Math.sin(ang + 0.4));
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  // ---------- pointer input ----------
+  var active = new Map();      // pointerId -> info
+  var panPointers = new Map(); // for pinch/pan with touch
+  var isShape = function (t) { return t === "line" || t === "rect" || t === "ellipse" || t === "arrow"; };
+
+  board.addEventListener("pointerdown", onDown, { passive: false });
+  board.addEventListener("pointermove", onMove, { passive: false });
+  board.addEventListener("pointerup", onUp, { passive: false });
+  board.addEventListener("pointercancel", onUp, { passive: false });
+  board.addEventListener("pointerleave", onUp, { passive: false });
+
+  function isDrawingInput(e) {
+    if (e.pointerType === "pen") return true;
+    if (e.pointerType === "mouse") return !state.penOnly;
+    if (e.pointerType === "touch") return !state.penOnly;   // finger toggle
+    return true;
+  }
+
+  function onDown(e) {
+    // Two-finger touch => pan/zoom gesture, never draw
+    if (e.pointerType === "touch") {
+      panPointers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (panPointers.size >= 2) { cancelCurrent(); return; }
+    }
+    if (!isDrawingInput(e)) return;
+    e.preventDefault();
+    board.setPointerCapture && board.setPointerCapture(e.pointerId);
+
+    var w = screenToWorld(e.clientX, e.clientY);
+    if (state.tool === "eraser") {
+      eraseAt(w[0], w[1]);
+      active.set(e.pointerId, { erasing: true });
+      return;
+    }
+    if (isShape(state.tool)) {
+      state.current = { tool: "pen", color: activeColor(), width: state.width,
+                        shape: state.tool, a: w, b: w };
+      active.set(e.pointerId, { shape: true });
+      render();
+      return;
+    }
+    // freehand
+    var p = e.pressure > 0 ? e.pressure : 0.5;
+    state.current = { tool: state.tool, color: activeColor(), width: state.width,
+                      points: [[w[0], w[1], p]] };
+    active.set(e.pointerId, { freehand: true });
+    render();
+  }
+
+  function onMove(e) {
+    // pinch/pan
+    if (e.pointerType === "touch" && panPointers.has(e.pointerId)) {
+      panPointers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (panPointers.size >= 2) { doPinch(); return; }
+    }
+    var info = active.get(e.pointerId);
+    if (!info) return;
+    e.preventDefault();
+
+    var events = (e.getCoalescedEvents && e.getCoalescedEvents().length)
+                 ? e.getCoalescedEvents() : [e];
+
+    if (info.erasing) {
+      for (var i = 0; i < events.length; i++) {
+        var we = screenToWorld(events[i].clientX, events[i].clientY);
+        eraseAt(we[0], we[1]);
+      }
+      return;
+    }
+    if (info.shape) {
+      var w = screenToWorld(e.clientX, e.clientY);
+      // hold => snap to axis / square / circle
+      state.current.b = maybeSnapShape(state.current.a, w, e);
+      render();
+      return;
+    }
+    if (info.freehand && state.current) {
+      for (var j = 0; j < events.length; j++) {
+        var ev = events[j];
+        var wp = screenToWorld(ev.clientX, ev.clientY);
+        var pr = ev.pressure > 0 ? ev.pressure : 0.5;
+        var last = state.current.points[state.current.points.length - 1];
+        // drop micro-moves to reduce noise
+        if (last && Math.hypot(wp[0] - last[0], wp[1] - last[1]) < 0.6 / state.scale) continue;
+        state.current.points.push([wp[0], wp[1], pr]);
+      }
+      // (optionally include predicted events for latency — visual only, not committed)
+      render();
+      if (e.getPredictedEvents) {
+        var pred = e.getPredictedEvents();
+        if (pred && pred.length) {
+          ctx.save();
+          var lastp = state.current.points[state.current.points.length - 1];
+          var stp = toolStyle(state.current.tool);
+          ctx.setTransform(DPR * state.scale, 0, 0, DPR * state.scale, DPR * state.tx, DPR * state.ty);
+          ctx.globalAlpha = stp.alpha * 0.5;
+          ctx.strokeStyle = state.current.color;
+          ctx.lineWidth = Math.max(0.4, state.width * stp.widthMul * 0.7);
+          ctx.lineCap = "round";
+          ctx.beginPath(); ctx.moveTo(lastp[0], lastp[1]);
+          for (var k = 0; k < pred.length; k++) {
+            var pw = screenToWorld(pred[k].clientX, pred[k].clientY);
+            ctx.lineTo(pw[0], pw[1]);
+          }
+          ctx.stroke(); ctx.restore();
+        }
+      }
+    }
+  }
+
+  function onUp(e) {
+    if (e.pointerType === "touch") panPointers.delete(e.pointerId);
+    lastPinch = null;
+    var info = active.get(e.pointerId);
+    if (!info) { return; }
+    active.delete(e.pointerId);
+    if (info.erasing) return;
+    if (!state.current) return;
+
+    if (info.shape) {
+      // discard zero-size shapes
+      var a = state.current.a, b = state.current.b;
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 2) commit(state.current);
+      state.current = null;
+      render();
+      return;
+    }
+    if (info.freehand) {
+      var s = state.current;
+      state.current = null;
+      if (s.points.length >= 1) {
+        // light de-jitter smoothing for pen/pencil (not highlighter)
+        if (s.tool === "pen" || s.tool === "pencil") {
+          s.points = C.smoothStroke(s.points, 1);
+        }
+        commit(s);
+      } else render();
+    }
+  }
+
+  function cancelCurrent() {
+    if (state.current) { state.current = null; render(); }
+    active.clear();
+  }
+
+  function activeColor() {
+    // If user is on the theme-default swatch, follow the theme.
+    return state.color === "__theme__" ? themeInkColor() : state.color;
+  }
+
+  function commit(stroke) {
+    state.strokes.push(stroke);
+    state.redo.length = 0;
+    updateUndoButtons();
+    render();
+  }
+
+  // ---------- eraser (stroke erase) ----------
+  function eraseAt(x, y) {
+    var r = Math.max(8, state.width) / state.scale;
+    var removed = false;
+    for (var i = state.strokes.length - 1; i >= 0; i--) {
+      if (strokeHit(state.strokes[i], x, y, r)) {
+        state.strokes.splice(i, 1); removed = true;
+      }
+    }
+    if (removed) { updateUndoButtons(); render(); }
+  }
+  function strokeHit(s, x, y, r) {
+    if (s.shape) {
+      var pts = shapeOutlinePoints(s);
+      return polyHit(pts, x, y, r);
+    }
+    var p = s.points;
+    for (var i = 0; i < p.length; i++) {
+      if (Math.hypot(p[i][0] - x, p[i][1] - y) < r + s.width) return true;
+    }
+    return false;
+  }
+  function polyHit(pts, x, y, r) {
+    for (var i = 0; i < pts.length; i++) {
+      if (Math.hypot(pts[i][0] - x, pts[i][1] - y) < r) return true;
+    }
+    return false;
+  }
+  function shapeOutlinePoints(s) {
+    var a = s.a, b = s.b, out = [];
+    var x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+    var w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
+    if (s.shape === "line" || s.shape === "arrow") {
+      for (var t = 0; t <= 1; t += 0.05) out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    } else if (s.shape === "rect") {
+      for (var u = 0; u <= 1; u += 0.05) {
+        out.push([x + w * u, y]); out.push([x + w * u, y + h]);
+        out.push([x, y + h * u]); out.push([x + w, y + h * u]);
+      }
+    } else {
+      var cx = x + w / 2, cy = y + h / 2;
+      for (var k = 0; k < Math.PI * 2; k += 0.2) out.push([cx + (w / 2) * Math.cos(k), cy + (h / 2) * Math.sin(k)]);
+    }
+    return out;
+  }
+
+  // ---------- shape snapping while dragging ----------
+  function maybeSnapShape(a, b, e) {
+    // Hold Shift (desktop) OR a long-ish drag with modifier: constrain.
+    var snap = e.shiftKey;
+    if (!snap) return b;
+    if (state.current.shape === "line" || state.current.shape === "arrow") {
+      // snap to 0/45/90 deg
+      var dx = b[0] - a[0], dy = b[1] - a[1];
+      var ang = Math.atan2(dy, dx);
+      var step = Math.PI / 4;
+      var snapped = Math.round(ang / step) * step;
+      var len = Math.hypot(dx, dy);
+      return [a[0] + len * Math.cos(snapped), a[1] + len * Math.sin(snapped)];
+    } else {
+      // square / circle
+      var w = b[0] - a[0], h = b[1] - a[1];
+      var m = Math.max(Math.abs(w), Math.abs(h));
+      return [a[0] + Math.sign(w || 1) * m, a[1] + Math.sign(h || 1) * m];
+    }
+  }
+
+  // ---------- snap last freehand to shape ----------
+  function snapLastFreehand() {
+    // find the most recent freehand stroke
+    for (var i = state.strokes.length - 1; i >= 0; i--) {
+      var s = state.strokes[i];
+      if (s.shape) continue;
+      var cls = C.classifyShape(s.points);
+      if (cls) {
+        var shaped = { tool: (s.tool === "highlighter" ? "pen" : s.tool),
+                       color: s.color, width: s.width, shape: cls.shape,
+                       a: cls.a, b: cls.b };
+        if (cls.corners) shaped.corners = cls.corners;
+        state.strokes[i] = shaped;
+        render();
+        toast("Snapped to " + cls.shape);
+      } else {
+        toast("Couldn't detect a shape");
+      }
+      return;
+    }
+    toast("No freehand stroke to snap");
+  }
+
+  // ---------- pinch/pan ----------
+  var lastPinch = null;
+  function doPinch() {
+    var pts = Array.from(panPointers.values());
+    if (pts.length < 2) return;
+    var p0 = pts[0], p1 = pts[1];
+    var cx = (p0[0] + p1[0]) / 2, cy = (p0[1] + p1[1]) / 2;
+    var d = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    if (lastPinch) {
+      var ds = d / (lastPinch.d || d);
+      // zoom about the pinch center
+      var wx = (cx - state.tx) / state.scale, wy = (cy - state.ty) / state.scale;
+      state.scale = Math.max(0.2, Math.min(8, state.scale * ds));
+      state.tx = cx - wx * state.scale;
+      state.ty = cy - wy * state.scale;
+      // pan
+      state.tx += cx - lastPinch.cx;
+      state.ty += cy - lastPinch.cy;
+      render();
+      showZoom();
+    }
+    lastPinch = { d: d, cx: cx, cy: cy };
+  }
+
+  // wheel / trackpad zoom + pan (desktop / Android with mouse)
+  board.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    if (e.ctrlKey) {
+      var f = Math.exp(-e.deltaY * 0.01);
+      var wx = (e.clientX - state.tx) / state.scale, wy = (e.clientY - state.ty) / state.scale;
+      state.scale = Math.max(0.2, Math.min(8, state.scale * f));
+      state.tx = e.clientX - wx * state.scale;
+      state.ty = e.clientY - wy * state.scale;
+    } else {
+      state.tx -= e.deltaX; state.ty -= e.deltaY;
+    }
+    render(); showZoom();
+  }, { passive: false });
+
+  var zoomTimer = null;
+  function showZoom() {
+    var z = document.getElementById("zoomBadge");
+    z.textContent = Math.round(state.scale * 100) + "%";
+    z.classList.add("show");
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(function () { z.classList.remove("show"); }, 900);
+  }
+
+  // ---------- undo / redo ----------
+  function undo() {
+    if (!state.strokes.length) return;
+    state.redo.push(state.strokes.pop());
+    updateUndoButtons(); render();
+  }
+  function redo() {
+    if (!state.redo.length) return;
+    state.strokes.push(state.redo.pop());
+    updateUndoButtons(); render();
+  }
+  function updateUndoButtons() {
+    document.getElementById("btnUndo").disabled = state.strokes.length === 0;
+    document.getElementById("btnRedo").disabled = state.redo.length === 0;
+  }
+
+  // ---------- export ----------
+  function exportPNG() {
+    var rect = C.exportRectForStrokes(state.strokes);
+    var scale = 2;
+    var off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(rect.w * scale));
+    off.height = Math.max(1, Math.round(rect.h * scale));
+    var g = off.getContext("2d");
+    // TRANSPARENT background by default (v2 decision). If background=light/dark,
+    // fill; else leave transparent.
+    if (CONFIG.background === "light" || CONFIG.background === "white") { g.fillStyle = "#ffffff"; g.fillRect(0, 0, off.width, off.height); }
+    else if (CONFIG.background === "dark") { g.fillStyle = "#0b0d10"; g.fillRect(0, 0, off.width, off.height); }
+    else if (CONFIG.background && CONFIG.background !== "transparent") { g.fillStyle = CONFIG.background; g.fillRect(0, 0, off.width, off.height); }
+    g.setTransform(scale, 0, 0, scale, -rect.x * scale, -rect.y * scale);
+    for (var i = 0; i < state.strokes.length; i++) drawStroke(g, state.strokes[i]);
+    return off.toDataURL("image/png");
+  }
+
+  function drawingModel() {
+    return { v: C.SCHEMA, w: window.innerWidth | 0, h: window.innerHeight | 0,
+             bg: CONFIG.background, strokes: state.strokes };
+  }
+
+  // ---------- done / cancel / upload ----------
+  var busy = false;
+  async function done() {
+    if (busy) return;
+    if (!state.strokes.length) { toast("Nothing to send"); return; }
+    if (!CONFIG.session_id || !CONFIG.token) { toast("No session — running standalone"); return; }
+    busy = true; setStatus("uploading…");
+    document.getElementById("btnDone").disabled = true;
+    try {
+      var dataUrl = exportPNG();
+      var pngB64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
+      var body = C.buildResultBody(CONFIG.session_id, pngB64, drawingModel());
+      var headers = { "Content-Type": "application/json" };
+      headers[CONFIG.token_header] = CONFIG.token;
+      var res = await fetch(CONFIG.resultUrl, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        setStatus("sent ✓"); toast("Sent to Emacs");
+        onSessionFinished();
+      }
+      else if (res.status === 401) {
+        setStatus("unauthorized"); toast("Token rejected — pair again");
+        onTokenRejected();
+      }
+      else { setStatus("error " + res.status); toast("Upload failed (" + res.status + ") — retry Done"); }
+    } catch (err) {
+      setStatus("network error"); toast("Upload failed — drawing is safe, retry Done");
+    } finally {
+      busy = false; document.getElementById("btnDone").disabled = false;
+    }
+  }
+
+  async function cancel() {
+    if (!CONFIG.session_id || !CONFIG.token) { toast("Standalone — nothing to cancel"); return; }
+    try {
+      var headers = { "Content-Type": "application/json" };
+      headers[CONFIG.token_header] = CONFIG.token;
+      await fetch(CONFIG.cancel_path, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({ session_id: CONFIG.session_id })
+      });
+      setStatus("cancelled");
+      toast("Cancelled");
+    } catch (e) { toast("Cancel failed"); }
+    onSessionFinished();
+  }
+
+  // ---------- UI wiring ----------
+  var PALETTE = ["__theme__", "#ff453a", "#ff9f0a", "#ffd60a", "#32d74b",
+                 "#0a84ff", "#5e5ce6", "#bf5af2", "#8e8e93", "#ffffff"];
+  function buildPalette() {
+    var el = document.getElementById("palette");
+    PALETTE.forEach(function (col, idx) {
+      var b = document.createElement("button");
+      b.className = "swatch";
+      b.setAttribute("aria-pressed", idx === 0 ? "true" : "false");
+      b.dataset.color = col;
+      b.style.background = col === "__theme__" ? "linear-gradient(135deg,#1c1c1e 50%,#f5f6f8 50%)" : col;
+      b.title = col === "__theme__" ? "Theme ink" : col;
+      b.addEventListener("click", function () { selectColor(col, b); });
+      el.appendChild(b);
+    });
+    // custom color
+    var cust = document.createElement("button");
+    cust.className = "swatch custom";
+    cust.title = "Custom color";
+    var inp = document.createElement("input");
+    inp.type = "color"; inp.value = "#0a84ff";
+    inp.addEventListener("input", function () { selectColor(inp.value, cust); cust.style.background = inp.value; });
+    cust.appendChild(inp);
+    el.appendChild(cust);
+  }
+  function selectColor(col, btn) {
+    state.color = col;
+    document.querySelectorAll("#palette .swatch").forEach(function (s) { s.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+  }
+
+  function selectTool(tool, btn) {
+    state.tool = tool;
+    document.querySelectorAll("#tools .tool, #shapes .tool").forEach(function (t) { t.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+  }
+
+  function wire() {
+    document.querySelectorAll("#tools .tool, #shapes .tool").forEach(function (b) {
+      b.addEventListener("click", function () { selectTool(b.dataset.tool, b); });
+    });
+    var wSlider = document.getElementById("width");
+    wSlider.addEventListener("input", function () {
+      state.width = parseFloat(wSlider.value);
+      document.getElementById("widthCap").textContent = String(state.width);
+    });
+    document.getElementById("btnUndo").addEventListener("click", undo);
+    document.getElementById("btnRedo").addEventListener("click", redo);
+    document.getElementById("btnSnap").addEventListener("click", snapLastFreehand);
+    document.getElementById("btnClear").addEventListener("click", function () {
+      if (!state.strokes.length) return;
+      state.redo = state.strokes.slice(); state.strokes = []; updateUndoButtons(); render(); toast("Cleared");
+    });
+    document.getElementById("btnDone").addEventListener("click", done);
+    document.getElementById("btnCancel").addEventListener("click", cancel);
+    document.getElementById("btnTheme").addEventListener("click", function () {
+      applyTheme(state.theme === "dark" ? "light" : "dark");
+    });
+    var pen = document.getElementById("tglPen");
+    pen.addEventListener("click", function () {
+      state.penOnly = !state.penOnly;
+      pen.setAttribute("aria-pressed", state.penOnly ? "true" : "false");
+    });
+    // keyboard shortcuts
+    window.addEventListener("keydown", function (e) {
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+        else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
+      }
+    });
+  }
+
+  function setStatus(t) { document.getElementById("status").textContent = t; }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove("show"); }, 1600);
+  }
+
+  // ---------- edit-mode restore ----------
+  // restore(): populate state.strokes from CONFIG (mode/drawing/background).
+  // Used both for the initial per-session boot AND each time the receiver
+  // enters DRAWING for a newly-polled session (CONFIG is updated first).
+  function restore() {
+    if (CONFIG.mode === "edit" && CONFIG.drawing) {
+      try {
+        var json = C.base64ToUtf8(CONFIG.drawing);
+        var model = C.deserialize(json);
+        state.strokes = model.strokes;
+        if (model.bg) CONFIG.background = model.bg;
+        setStatus("editing " + (CONFIG.name || ""));
+      } catch (e) {
+        setStatus("restore failed");
+      }
+    } else if (CONFIG.session_id) {
+      setStatus(CONFIG.mode === "edit" ? "editing" : "new figure");
+    } else {
+      setStatus("standalone");
+    }
+  }
+
+  // =====================================================================
+  // ---------- RECEIVER bootstrap state machine ----------
+  // Screens: "pairing" | "waiting" | "drawing" | "done".
+  // The per-session host-open path (CONFIG.session_id present at initial
+  // load) goes straight to "drawing" and, after Done/Cancel, to "done" —
+  // it never touches pairing/waiting. Otherwise this is RECEIVER mode:
+  // pairing (no token) <-> waiting (long-poll) -> drawing -> back to waiting.
+  // =====================================================================
+  var isPerSessionMode = (CONFIG.screen === "drawing");
+  var pollAbort = null;      // current in-flight long-poll AbortController
+  var pollGeneration = 0;    // bumped to make a stale poll loop stop re-arming
+  var backoff = C.makeBackoff();
+
+  var SCREEN_IDS = { pairing: "screenPairing", waiting: "screenWaiting", done: "screenDone" };
+  function showScreen(name) {
+    Object.keys(SCREEN_IDS).forEach(function (key) {
+      var el = document.getElementById(SCREEN_IDS[key]);
+      if (el) el.hidden = (key !== name);
+    });
+    // The drawing UI (toolbar/actions/topbar) is just the normal document
+    // body; overlays sit above it. When a non-drawing screen is shown we
+    // don't need to hide the toolbar (the overlay is opaque and covers it),
+    // but drop pointer/keyboard focus concerns are irrelevant since the
+    // overlay is on top and the board isn't interactive underneath it.
+  }
+
+  function enterPairing() {
+    pollGeneration++; // stop any in-flight waiting loop from re-arming
+    if (pollAbort) { try { pollAbort.abort(); } catch (e) {} pollAbort = null; }
+    showScreen("pairing");
+    var errEl = document.getElementById("pairError");
+    if (errEl) errEl.textContent = "";
+  }
+
+  function enterWaiting() {
+    showScreen("waiting");
+    var originEl = document.getElementById("waitingOrigin");
+    if (originEl) originEl.textContent = location.origin;
+    backoff.reset();
+    startLongPoll();
+  }
+
+  function enterDrawingForSession(parsed) {
+    pollGeneration++; // stop the waiting loop's poll chain
+    if (pollAbort) { try { pollAbort.abort(); } catch (e) {} pollAbort = null; }
+    CONFIG.session_id = parsed.sessionID;
+    CONFIG.mode = parsed.mode;
+    CONFIG.name = parsed.name;
+    CONFIG.background = parsed.background;
+    CONFIG.drawing = parsed.restoreJSON
+      ? C.utf8ToBase64(parsed.restoreJSON)
+      : null;
+    state.strokes = [];
+    state.redo = [];
+    state.current = null;
+    state.scale = 1; state.tx = 0; state.ty = 0; // fresh pan/zoom per incoming session
+    restore();
+    updateUndoButtons();
+    render();
+    showScreen(null); // hide all overlays -> drawing UI beneath is visible
+  }
+
+  function enterDone() {
+    showScreen("done");
+  }
+
+  // Called after a successful /result or /cancel.
+  function onSessionFinished() {
+    if (isPerSessionMode) { enterDone(); return; }
+    // Receiver mode: clear the canvas and go back to waiting for the next one.
+    state.strokes = []; state.redo = []; state.current = null;
+    state.scale = 1; state.tx = 0; state.ty = 0;
+    render(); updateUndoButtons();
+    enterWaiting();
+  }
+
+  function onTokenRejected() {
+    writeStoredToken(null);
+    CONFIG.token = null;
+    if (isPerSessionMode) { enterDone(); return; }
+    enterPairing();
+  }
+
+  // ---- pairing ----
+  async function submitPair() {
+    var input = document.getElementById("pairCode");
+    var errEl = document.getElementById("pairError");
+    var code = input ? input.value.trim() : "";
+    if (errEl) errEl.textContent = "";
+    if (!/^[0-9]{6}$/.test(code)) {
+      if (errEl) errEl.textContent = "Enter the 6-digit code.";
+      return;
+    }
+    var btn = document.getElementById("btnPair");
+    if (btn) btn.disabled = true;
+    try {
+      var res = await fetch(CONFIG.pair_path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(C.pairRequestBody(code))
+      });
+      if (res.ok) {
+        var data = await res.json();
+        if (data && data.token) {
+          writeStoredToken(data.token);
+          CONFIG.token = data.token;
+          enterWaiting();
+          return;
+        }
+      }
+      if (errEl) errEl.textContent = "Pairing failed — check the code.";
+    } catch (e) {
+      if (errEl) errEl.textContent = "Pairing failed — check the code.";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function doUnpair() {
+    pollGeneration++;
+    if (pollAbort) { try { pollAbort.abort(); } catch (e) {} pollAbort = null; }
+    writeStoredToken(null);
+    CONFIG.token = null;
+    enterPairing();
+  }
+
+  // ---- long-poll GET session_path ----
+  // Timeout exceeds the server's ~55s hold so a genuinely stuck request gets
+  // recycled rather than piling up forever.
+  var LONGPOLL_TIMEOUT_MS = 60000;
+
+  function startLongPoll() {
+    var myGeneration = pollGeneration;
+    pollOnce(myGeneration);
+  }
+
+  async function pollOnce(myGeneration) {
+    if (myGeneration !== pollGeneration) return; // superseded
+    var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    pollAbort = controller;
+    var headers = {};
+    headers[CONFIG.token_header] = CONFIG.token;
+    var timer = null;
+    if (controller) timer = setTimeout(function () { controller.abort(); }, LONGPOLL_TIMEOUT_MS);
+    try {
+      var res = await fetch(CONFIG.session_path, {
+        method: "GET",
+        headers: headers,
+        signal: controller ? controller.signal : undefined
+      });
+      if (timer) clearTimeout(timer);
+      if (myGeneration !== pollGeneration) return; // superseded while awaiting
+      if (res.status === 200) {
+        var json = await res.json();
+        var parsed = C.parseSessionResponse(json);
+        backoff.reset();
+        enterDrawingForSession(parsed);
+        return;
+      }
+      if (res.status === 204) {
+        backoff.reset();
+        pollOnce(myGeneration); // immediate re-poll
+        return;
+      }
+      if (res.status === 401) {
+        onTokenRejected();
+        return;
+      }
+      // Unexpected status: treat like a network error (backoff + retry).
+      scheduleRetry(myGeneration);
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      if (myGeneration !== pollGeneration) return; // superseded / aborted on purpose
+      scheduleRetry(myGeneration);
+    }
+  }
+
+  function scheduleRetry(myGeneration) {
+    var delaySec = backoff.next();
+    setTimeout(function () {
+      if (myGeneration !== pollGeneration) return;
+      pollOnce(myGeneration);
+    }, delaySec * 1000);
+  }
+
+  function wireReceiver() {
+    var pairBtn = document.getElementById("btnPair");
+    if (pairBtn) pairBtn.addEventListener("click", submitPair);
+    var pairInput = document.getElementById("pairCode");
+    if (pairInput) pairInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") submitPair();
+    });
+    var unpairBtn = document.getElementById("btnUnpair");
+    if (unpairBtn) unpairBtn.addEventListener("click", doUnpair);
+  }
+
+  // ---------- boot ----------
+  function boot() {
+    // theme from prefers-color-scheme
+    var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    applyTheme(prefersDark ? "dark" : "light");
+    buildPalette();
+    wire();
+    wireReceiver();
+    resize();
+    updateUndoButtons();
+
+    if (CONFIG.screen === "drawing") {
+      // Existing one-shot per-session path: draw straight away.
+      restore();
+      render();
+      showScreen(null);
+    } else if (CONFIG.screen === "waiting") {
+      render();
+      enterWaiting();
+    } else {
+      render();
+      enterPairing();
+    }
+  }
+  boot();
+
+  // expose for debugging / potential DOM tests
+  window.__orgpad = {
+    state: state, exportPNG: exportPNG, drawingModel: drawingModel,
+    CONFIG: CONFIG, enterDrawingForSession: enterDrawingForSession,
+    onSessionFinished: onSessionFinished
+  };
+})();
+</script>
+</body>
+</html>
