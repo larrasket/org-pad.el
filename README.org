@@ -13,8 +13,7 @@ org-pad lets you draw on your iPad with Apple Pencil and have the result in your
 :CUSTOM_ID: demo
 :END:
 
-https://youtu.be/q_te8iX-Cjo
-
+<iframe width="560" height="315" src="https://www.youtube.com/embed/q_te8iX-Cjo?si=hdW3vdGxpeaR2-Ps" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ** Get started, one-time setup
 :PROPERTIES:
