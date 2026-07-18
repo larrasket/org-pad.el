@@ -529,9 +529,36 @@ carrier NAT), which is generally not reachable for a same-network iPad."
             (unless (member ip out) (push ip out))))))
     (nreverse out)))
 
+(defvar org-pad--local-hostname-cache 'unset
+  "Cached result of `org-pad--local-hostname' (computed once per session).")
+
+(defun org-pad--local-hostname ()
+  "Return this machine's mDNS hostname (e.g. \"my-mac.local\"), or nil.
+Such names resolve via Bonjour/mDNS on macOS and iOS to the machine's CURRENT
+IP address, so URLs built from them keep working across DHCP / network changes
+-- no IP to track or re-enter.  On macOS the authoritative name comes from
+`scutil --get LocalHostName'; elsewhere it falls back to the system name."
+  (when (eq org-pad--local-hostname-cache 'unset)
+    (setq org-pad--local-hostname-cache
+          (let ((name (cond
+                       ((executable-find "scutil")
+                        (let ((n (string-trim
+                                  (shell-command-to-string "scutil --get LocalHostName 2>/dev/null"))))
+                          (and (not (string-empty-p n)) n)))
+                       (t (car (split-string (system-name) "\\." t))))))
+            (and name (not (string-empty-p name))
+                 (if (string-suffix-p ".local" name) name (concat name ".local"))))))
+  org-pad--local-hostname-cache)
+
+(defun org-pad--host-candidates ()
+  "Hosts for building setup/receiver URLs: the mDNS `.local' name FIRST
+\(IP-change-proof), then the LAN IPv4 addresses as fallbacks."
+  (let ((local (org-pad--local-hostname)))
+    (append (and local (list local)) (org-pad--ipv4-addresses))))
+
 (defun org-pad--setup-urls (port)
-  "List of http://IP:PORT/setup URLs for every LAN/tailnet IPv4."
-  (mapcar (lambda (ip) (format "http://%s:%d/setup" ip port)) (org-pad--ipv4-addresses)))
+  "List of http://HOST:PORT/setup URLs; the IP-stable `.local' host first."
+  (mapcar (lambda (h) (format "http://%s:%d/setup" h port)) (org-pad--host-candidates)))
 
 (defvar org-pad--bonjour-process nil "The running `dns-sd -R' subprocess, or nil.")
 
@@ -666,7 +693,9 @@ re-editable — spec error row) or not on a figure at all."
         (erase-buffer)
         (insert "OrgPad setup\n\n"
                 "1. Install Swift Playgrounds (App Store) on the iPad.\n"
-                "2. Open one of these URLs in iPad Safari and download the app:\n\n")
+                "2. Open one of these URLs in iPad Safari and download the app.\n"
+                "   The first (.local) address is best — it keeps working even if\n"
+                "   your Mac's IP changes, so there's no IP to track:\n\n")
         (dolist (url (org-pad--setup-urls org-pad-port))
           (insert "   " url "\n"))
         (insert (format "\n3. Tap Run in Playgrounds, then enter this code:\n\n      %s\n\n" code)
@@ -1178,11 +1207,12 @@ Prefers the first non-loopback IPv4; falls back to 127.0.0.1."
 ;;;; ---------------------------------------------------------------------------
 
 (defun org-pad--web-receiver-urls ()
-  "List of http://IP:PORT/canvas receiver URLs, one per LAN IPv4 address.
-Open one of these ONCE on the iPad (or any browser); it pairs in-page and then
-long-polls for drawings queued by `org-pad-draw'."
-  (mapcar (lambda (ip) (format "http://%s:%d/canvas" ip org-pad-port))
-          (org-pad--ipv4-addresses)))
+  "List of http://HOST:PORT/canvas receiver URLs; the IP-stable `.local' host first.
+Open one ONCE on the iPad (or any browser); it pairs in-page and then long-polls
+for drawings queued by `org-pad-draw'.  Prefer the `.local' URL — it survives
+the Mac's IP changing, so you never have to re-open a new address."
+  (mapcar (lambda (h) (format "http://%s:%d/canvas" h org-pad-port))
+          (org-pad--host-candidates)))
 
 (defun org-pad--open-web-session (session-id &optional token)
   "Announce that web SESSION-ID was queued for the receiver.
