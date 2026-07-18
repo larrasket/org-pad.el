@@ -344,9 +344,23 @@
   (dolist (u (org-pad--setup-urls 8777))
     (should (string-suffix-p ":8777/setup" u))))
 (ert-deftest org-pad-bonjour-linux-safe ()
-  "Absence of dns-sd is non-fatal."
+  "Absence of any mDNS advertiser is non-fatal."
   (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
-    (should (null (org-pad--bonjour-start 8777)))))
+    (let ((org-pad--bonjour-process nil))
+      (should (null (org-pad--bonjour-start 8777))))))
+
+(ert-deftest org-pad-bonjour-avahi-on-linux ()
+  "On Linux (no dns-sd) with avahi-publish, build an avahi service command."
+  (cl-letf (((symbol-function 'executable-find)
+             (lambda (name &rest _)
+               (when (equal name "avahi-publish") "/usr/bin/avahi-publish")))
+            ((symbol-function 'make-process) (lambda (&rest args) (plist-get args :command))))
+    (let* ((org-pad--bonjour-process nil)
+           (cmd (org-pad--bonjour-start 8777)))
+      (should (equal (car cmd) "/usr/bin/avahi-publish"))
+      (should (member "-s" cmd))
+      (should (member "_orgpad._tcp" cmd))
+      (should (member "8777" cmd)))))
 
 ;;;; Infra: /setup + /app
 (ert-deftest org-pad-setup-html-has-app-link ()

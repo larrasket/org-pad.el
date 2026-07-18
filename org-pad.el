@@ -563,16 +563,29 @@ IP address, so URLs built from them keep working across DHCP / network changes
 (defvar org-pad--bonjour-process nil "The running `dns-sd -R' subprocess, or nil.")
 
 (defun org-pad--bonjour-start (port)
-  "Advertise `_orgpad._tcp' on PORT via `dns-sd -R'.  No-op (nil) when unavailable."
+  "Advertise `_orgpad._tcp' on PORT via mDNS so the iPad app auto-discovers it.
+Uses `dns-sd' on macOS and `avahi-publish'/`avahi-publish-service' on Linux.
+Returns the process, or nil (with a message) when no mDNS advertiser is
+available -- the setup URL still works for manual/browser use, and the `.local'
+address it prints resolves via mDNS regardless."
   (org-pad--bonjour-stop)
-  (let ((exe (executable-find "dns-sd")))
-    (if (not exe)
-        (progn (message "org-pad: dns-sd not found; use manual host:port on the iPad") nil)
-      (let* ((host (or (car (split-string (system-name) "\\." t)) "Mac"))
-             (name (format "OrgPad (%s)" host)))
-        (setq org-pad--bonjour-process
-              (make-process :name "org-pad-bonjour" :buffer " *org-pad-bonjour*" :noquery t
-                            :command (list exe "-R" name "_orgpad._tcp" "." (number-to-string port))))))))
+  (let* ((host (or (car (split-string (system-name) "\\." t)) "host"))
+         (name (format "OrgPad (%s)" host))
+         (portstr (number-to-string port))
+         (dns-sd (executable-find "dns-sd"))
+         (avahi (or (executable-find "avahi-publish")
+                    (executable-find "avahi-publish-service")))
+         (command (cond
+                   (dns-sd (list dns-sd "-R" name "_orgpad._tcp" "." portstr))
+                   (avahi  (list avahi "-s" name "_orgpad._tcp" portstr)))))
+    (if (not command)
+        (progn
+          (message "org-pad: no mDNS advertiser (install dns-sd on macOS or \
+avahi-utils on Linux); the printed setup URL still works")
+          nil)
+      (setq org-pad--bonjour-process
+            (make-process :name "org-pad-bonjour" :buffer " *org-pad-bonjour*" :noquery t
+                          :command command)))))
 
 (defun org-pad--bonjour-stop ()
   "Kill the Bonjour advertisement subprocess if running."

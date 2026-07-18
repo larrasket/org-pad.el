@@ -9,6 +9,9 @@ final class SessionLoop: ObservableObject {
     private weak var connection: ConnectionStore?
     private var pollTask: Task<Void, Never>?
     private var backoff = Backoff(base: 1, cap: 30)
+    /// Consecutive poll failures; after a couple we assume the server's address
+    /// changed and ask ConnectionStore to re-find it via Bonjour.
+    private var failCount = 0
     private let pollTimeout: TimeInterval = 60   // > server's 55s hold
 
     func configure(with connection: ConnectionStore) { self.connection = connection }
@@ -31,7 +34,7 @@ final class SessionLoop: ObservableObject {
                 isPolling = true
                 let session = try await poll(client: client)
                 isPolling = false
-                backoff.reset(); lastError = nil
+                backoff.reset(); lastError = nil; failCount = 0
                 if let session {
                     // Clear pollTask BEFORE returning so a later finishSession()
                     // -> resume() sees pollTask == nil and restarts polling.
@@ -47,6 +50,13 @@ final class SessionLoop: ObservableObject {
             } catch {
                 isPolling = false
                 lastError = error.localizedDescription
+                // After a couple of consecutive failures, assume the server's IP
+                // changed and re-find it by name via Bonjour (keeps the token).
+                failCount += 1
+                if failCount >= 2 {
+                    connection?.rediscoverHost()
+                    failCount = 0
+                }
                 let delay = backoff.next()
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }

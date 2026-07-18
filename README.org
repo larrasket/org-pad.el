@@ -120,7 +120,7 @@ are treated as non-editable and =org-pad-edit= an error.
 
 Pending draw requests live in memory in the running Emacs process. If you restart Emacs (or it crashes) before the iPad has picked up and returned a queued drawing, that request is lost and you'll need to run =org-pad-draw= again.
 
-I have only tested this on macOS, but Bonjour should do in Linux too.
+Tested primarily on macOS, but Linux works too: the mDNS advertisement uses =avahi-publish= (install =avahi-utils= and run =avahi-daemon=), and everything else is platform-agnostic. Either way, prefer the =.local= setup URL — it resolves via mDNS to the machine's current IP, so it keeps working even when the IP changes, and the native app auto-reconnects by re-finding the server by name if it does.
 
 ** License
 :PROPERTIES:

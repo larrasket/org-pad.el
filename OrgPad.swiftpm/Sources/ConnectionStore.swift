@@ -12,11 +12,16 @@ final class ConnectionStore: ObservableObject {
     @AppStorage("orgpad.host") var host: String = ""
     @AppStorage("orgpad.port") var port: Int = 8777
     @AppStorage("orgpad.token") var token: String = ""
+    /// The Bonjour service name we paired with, so auto-reconnect can re-find the
+    /// SAME server (by name, independent of its IP) after an IP change.
+    @AppStorage("orgpad.serviceName") var serviceName: String = ""
     @Published var discovered: [Discovered] = []
     @Published var isPairing = false
     @Published var pairError: String?
     @Published var manualEntry: String = ""
+    @Published var isReconnecting = false
     private var browser: NWBrowser?
+    private var reconnectBrowser: NWBrowser?
 
     var paired: Bool { !token.isEmpty && !host.isEmpty }
     var client: OrgPadClient? {
@@ -45,6 +50,8 @@ final class ConnectionStore: ObservableObject {
     func stopBrowsing() { browser?.cancel(); browser = nil }
 
     func resolveAndPair(_ discovered: Discovered, code: String) {
+        // Remember which service we paired with so auto-reconnect can re-find it.
+        serviceName = discovered.name
         // Force IPv4: the Emacs server binds 0.0.0.0 (IPv4 only), but Bonjour
         // also advertises IPv6 (often link-local fe80::…%zone) which neither
         // routes to the server nor forms a valid URL host. Constrain resolution
@@ -114,4 +121,74 @@ final class ConnectionStore: ObservableObject {
     }
 
     func invalidateToken() { token = "" }
+
+    // MARK: - Auto-reconnect (survive the server's IP changing)
+    //
+    // Bonjour finds the server by NAME, independent of its IP. When polling
+    // starts failing (e.g. the Mac got a new DHCP lease), re-browse, find the
+    // same service, resolve its CURRENT address, and update `host` — no
+    // re-pairing, the token is kept. This makes the native app IP-change-proof
+    // regardless of how it was originally paired.
+
+    func rediscoverHost() {
+        guard paired, reconnectBrowser == nil else { return }
+        isReconnecting = true
+        let params = NWParameters()
+        params.includePeerToPeer = false
+        let browser = NWBrowser(for: .bonjour(type: "_orgpad._tcp", domain: nil), using: params)
+        reconnectBrowser = browser
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            Task { @MainActor in
+                guard let self, self.reconnectBrowser != nil else { return }
+                // Prefer the service we paired with; else the first one found.
+                let match = results.first(where: { r in
+                    if case let .service(name, _, _, _) = r.endpoint { return name == self.serviceName }
+                    return false
+                }) ?? results.first
+                guard let endpoint = match?.endpoint else { return }
+                self.stopReconnectBrowsing()
+                self.resolveHost(endpoint)
+            }
+        }
+        browser.start(queue: .main)
+        // Give up after a few seconds if nothing is found (stay on the old host;
+        // the poll loop keeps retrying and may trigger another attempt later).
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8 * 1_000_000_000)
+            if self.reconnectBrowser != nil { self.stopReconnectBrowsing() }
+        }
+    }
+
+    private func stopReconnectBrowsing() {
+        reconnectBrowser?.cancel()
+        reconnectBrowser = nil
+        isReconnecting = false
+    }
+
+    /// Resolve a discovered endpoint to its current host:port and update storage.
+    private func resolveHost(_ endpoint: NWEndpoint) {
+        let params = NWParameters.tcp
+        if let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ip.version = .v4
+        }
+        let conn = NWConnection(to: endpoint, using: params)
+        conn.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                if let remote = conn.currentPath?.remoteEndpoint,
+                   case let .hostPort(host: h, port: p) = remote {
+                    let hostStr = Self.hostString(h)
+                    let portInt = Int(p.rawValue)
+                    conn.cancel()
+                    Task { @MainActor in self?.host = hostStr; self?.port = portInt }
+                } else {
+                    conn.cancel()
+                }
+            case .failed:
+                conn.cancel()
+            default: break
+            }
+        }
+        conn.start(queue: .main)
+    }
 }
