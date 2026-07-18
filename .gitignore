@@ -2,4 +2,3 @@
 /tests/fixtures/*.out
 .DS_Store
 OrgPad.swiftpm/.build/
-/README.md
