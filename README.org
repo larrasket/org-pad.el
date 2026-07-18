@@ -2,17 +2,19 @@
 :PROPERTIES:
 :CUSTOM_ID: org-pad.el
 :END:
-
 Seamless iPad drawing into org-mode.
 
-[[https://img.shields.io/badge/license-GPLv3-blue.svg]] [[https://img.shields.io/badge/Emacs-28.1%2B-7F5AB6.svg]] [[https://img.shields.io/badge/iPadOS-16%2B-black.svg]] [[https://img.shields.io/badge/also-web%20canvas-1e88e5.svg]] [[https://img.shields.io/badge/no%20Xcode-no%20App%20Store-2ea44f.svg]]
+# [[https://img.shields.io/badge/license-GPLv3-blue.svg]] [[https://img.shields.io/badge/Emacs-28.1%2B-7F5AB6.svg]] [[https://img.shields.io/badge/iPadOS-16%2B-black.svg]] [[https://img.shields.io/badge/also-web%20canvas-1e88e5.svg]] [[https://img.shields.io/badge/no%20Xcode-no%20App%20Store-2ea44f.svg]]
 
 org-pad lets you draw on your iPad with Apple Pencil and have the result in your org-mode buffer as an inline figure.
 
-** TODO Demo
+** Demo
 :PROPERTIES:
 :CUSTOM_ID: demo
 :END:
+
+https://youtu.be/q_te8iX-Cjo
+
 
 ** Get started, one-time setup
 :PROPERTIES:
@@ -45,18 +47,16 @@ entering it.
 - =org-pad-draw= is DWIM: on a re-editable figure link it edits; anywhere else it creates a new figure at point.
 - The server keeps running across multiple draw requests; use =M-x org-pad-server-stop= to shut it (and the Bonjour advertisement) down, e.g. before switching networks or ending your Emacs session.
 - =M-x org-pad-menu= opens a transient menu with draw / edit / setup, the client toggle, the figure background, and server start/stopm a convenient single entry point if you don't want to remember commands.
-
 ** Drawing on the web instead of the iPad
 :PROPERTIES:
 :CUSTOM_ID: drawing-on-the-web-instead-of-the-ipad
 :END:
-The web canvas is a serious surface, pressure/tilt ink,
-pen/marker/pencil/ highlighter/eraser, color and width,
-line/rectangle/ellipse/arrow shape tools, undo/redo, pan and pinch-zoom,
-and a light/dark toggle, that runs on anything with a browser (iPad
-Safari, Android, desktop), no iPad app or developer account needed.
+The web canvas is [[https://github.com/tldraw/tldraw][tldraw]] .
 
-It works as a *receiver*, just like the native app's Waiting screen:
+tldraw is loaded from a CDN, so the device needs internet
+access the first time it opens the page.  
+
+It works as a receiver, just like the native app's Waiting screen:
 
 1. Set =org-pad-client= to =web= (or =ask=).
 2. Run =M-x org-pad-setup=. Alongside the iPad instructions it lists a
@@ -90,9 +90,6 @@ init file:
   =/canvas= (defaults to =web/canvas.html= shipped with the package).
 - =org-pad-web-open-function= (default =nil=) when non-nil (e.g.
   =browse-url=), =org-pad-draw=.
-
-
-
 ** Notes
 :PROPERTIES:
 :CUSTOM_ID: the-self-contained-png-format
@@ -120,7 +117,7 @@ are treated as non-editable and =org-pad-edit= an error.
 
 Pending draw requests live in memory in the running Emacs process. If you restart Emacs (or it crashes) before the iPad has picked up and returned a queued drawing, that request is lost and you'll need to run =org-pad-draw= again.
 
-Tested primarily on macOS, but Linux works too: the mDNS advertisement uses =avahi-publish= (install =avahi-utils= and run =avahi-daemon=), and everything else is platform-agnostic. Either way, prefer the =.local= setup URL — it resolves via mDNS to the machine's current IP, so it keeps working even when the IP changes, and the native app auto-reconnects by re-finding the server by name if it does.
+I tested with macOS, but Linux should work too (the mDNS advertisement uses =avahi-publish= (install =avahi-utils= and run =avahi-daemon=)), and everything else is platform-agnostic.
 
 ** License
 :PROPERTIES:

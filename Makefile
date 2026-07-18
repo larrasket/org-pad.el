@@ -1,7 +1,7 @@
 EMACS ?= emacs
 EL    := org-pad.el
 
-.PHONY: test compile lint zip fake-ipad clean swift app verify-web
+.PHONY: test compile lint zip fake-ipad clean swift app verify-web web typecheck
 
 test:
 	$(EMACS) -Q --batch -L . -l tests/org-pad-test.el \
@@ -29,7 +29,7 @@ typecheck:
 		OrgPad.swiftpm/Sources/*.swift
 
 web:
-	cd web && node verify.mjs && node verify_receiver.mjs && node smoke.mjs && node smoke_receiver.mjs
+	cd web && node e2e.mjs   # needs Playwright: npm i -D playwright && npx playwright install chromium (skips if absent)
 
 fake-ipad:
 	./fake-ipad.sh $(ARGS)

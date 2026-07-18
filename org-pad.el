@@ -1184,7 +1184,11 @@ page boots as a receiver."
                        (org-pad--canvas-html session-id token mode background web-json
                                              :name name :result-url result-url
                                              :cancel-url cancel-url)
-                       'utf-8))))
+                       'utf-8)
+                      ;; Never let the browser cache the canvas shell — otherwise
+                      ;; an updated web/canvas.html is masked by a stale copy.
+                      '(("Cache-Control" . "no-store, no-cache, must-revalidate")
+                        ("Pragma" . "no-cache")))))
 
 (defun org-pad--canvas-url (host session-id token)
   "Build the http://HOST/canvas?session=..&token=.. URL string."
