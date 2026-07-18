@@ -2,24 +2,19 @@
 :PROPERTIES:
 :CUSTOM_ID: org-pad.el
 :END:
+
 Seamless iPad drawing into org-mode.
 
-org-pad lets you draw on your iPad with Apple Pencil and have the result
- in your org-mode buffer as an inline figure.
+[[https://img.shields.io/badge/license-GPLv3-blue.svg]] [[https://img.shields.io/badge/Emacs-28.1%2B-7F5AB6.svg]] [[https://img.shields.io/badge/iPadOS-16%2B-black.svg]] [[https://img.shields.io/badge/also-web%20canvas-1e88e5.svg]] [[https://img.shields.io/badge/no%20Xcode-no%20App%20Store-2ea44f.svg]]
 
-Emacs runs a small, pure-Elisp HTTP server; a companion iPad app (built with PencilKit, running inside Swift Playgrounds) long-polls that server for drawing requests, lets you sketch, and uploads the result back. The PNG that comes back is self-contained.
+org-pad lets you draw on your iPad with Apple Pencil and have the result in your org-mode buffer as an inline figure.
 
-*** Smart ink
+** TODO Demo
 :PROPERTIES:
-:CUSTOM_ID: smart-ink
+:CUSTOM_ID: demo
 :END:
-With Snap shapes on, a rough freehand line, rectangle, ellipse,
-triangle, or arrow is cleaned up to crisp geometry the moment you lift
-the pencil; real handwriting is detected and left untouched (the
-recognizer is tuned to never snap cursive or scribbles). With *Smooth*
-on, raw ink is de-jittered without changing what you wrote.
 
-** One-time setup
+** Get started, one-time setup
 :PROPERTIES:
 :CUSTOM_ID: one-time-setup
 :END:
@@ -41,7 +36,7 @@ You only need to repeat this flow when pairing a new iPad, after
 clearing =org-pad-token-file=, or if the code expires before you finish
 entering it.
 
-** Daily use
+** Usage
 :PROPERTIES:
 :CUSTOM_ID: daily-use
 :END:
@@ -103,6 +98,13 @@ init file:
 :CUSTOM_ID: the-self-contained-png-format
 :END:
 
+
+With Snap shapes on, a rough freehand line, rectangle, ellipse,
+triangle, or arrow is cleaned up to crisp geometry the moment you lift
+the pencil; real handwriting is detected and left untouched (the
+recognizer is tuned to never snap cursive or scribbles). With *Smooth*
+on, raw ink is de-jittered without changing what you wrote.
+
 =org-pad-draw= queues a drawing request that the iPad app picks up the
 moment it's foregrounded, the app long-polls the server, and
 returning to it (from the Dock, the app switcher, or by tapping its
@@ -117,7 +119,6 @@ off. PNGs without an =orPd= chunk (screenshots, images from elsewhere)
 are treated as non-editable and =org-pad-edit= an error.
 
 Pending draw requests live in memory in the running Emacs process. If you restart Emacs (or it crashes) before the iPad has picked up and returned a queued drawing, that request is lost and you'll need to run =org-pad-draw= again.
-  
 
 I have only tested this on macOS, but Bonjour should do in Linux too.
 

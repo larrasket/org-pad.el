@@ -22,6 +22,8 @@ enum SurfaceStyle: String, CaseIterable, Identifiable {
     case neutral   // checkerboard — both light and dark ink stay visible
     case dark
     case light
+    case lines     // ruled notebook paper (align handwriting)
+    case grid      // graph paper
 
     var id: String { rawValue }
 
@@ -30,6 +32,8 @@ enum SurfaceStyle: String, CaseIterable, Identifiable {
         case .neutral: return "Neutral"
         case .dark: return "Dark"
         case .light: return "Light"
+        case .lines: return "Ruled lines"
+        case .grid: return "Grid"
         }
     }
 
@@ -38,6 +42,8 @@ enum SurfaceStyle: String, CaseIterable, Identifiable {
         case .neutral: return "checkerboard.rectangle"
         case .dark: return "moon.fill"
         case .light: return "sun.max.fill"
+        case .lines: return "line.3.horizontal"
+        case .grid: return "square.grid.3x3"
         }
     }
 }
@@ -112,6 +118,11 @@ struct PKCanvasRepresentable: UIViewRepresentable {
         // means the exported ink is never contaminated by a surface fill.
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
+        // Enable pinch-to-zoom on the canvas (PKCanvasView is a UIScrollView).
+        // Pencil keeps drawing; two fingers pan and pinch-zoom the drawing.
+        canvas.minimumZoomScale = 1.0
+        canvas.maximumZoomScale = 5.0
+        canvas.bouncesZoom = true
         if let data = model.initialDrawingData, let drawing = try? PKDrawing(data: data) {
             canvas.drawing = drawing
         }
@@ -322,6 +333,10 @@ struct CanvasScreen: View {
     /// persisted app-wide. Default `.neutral` keeps both light and dark ink
     /// visible; pick `.dark` to draw with a white pen and still export transparent.
     @AppStorage("orgpad.surface") private var surface: SurfaceStyle = .neutral
+    /// Toolbar can be collapsed out of the way and pinned to the top or bottom
+    /// edge (persisted), so it never gets stuck over the drawing.
+    @AppStorage("orgpad.toolbarCollapsed") private var toolbarCollapsed = false
+    @AppStorage("orgpad.toolbarAtTop") private var toolbarAtTop = false
     @State private var toolbarTick = 0   // pokes undo/redo enablement refresh
 
     init(session: Session) {
@@ -337,8 +352,28 @@ struct CanvasScreen: View {
                 .ignoresSafeArea()
             if model.uploadFailed { retryBanner }
         }
-        .overlay(alignment: .bottom) { toolbar }
+        // The bar is pinned to whichever edge the user chose, and respects the
+        // safe area (so it never lands in the middle in portrait).
+        .safeAreaInset(edge: toolbarAtTop ? .top : .bottom) {
+            if toolbarCollapsed { collapsedHandle } else { toolbar }
+        }
         .onAppear { model.rebind(connection: connection, loop: loop) }
+    }
+
+    // A small glass pill shown when the toolbar is collapsed; tap to expand.
+    private var collapsedHandle: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { toolbarCollapsed = false }
+            } label: {
+                Image(systemName: toolbarAtTop ? "chevron.down" : "chevron.up")
+                    .frame(width: 40, height: 30)
+            }
+            .orgPadGlassButton()
+            .padding(.horizontal, 16)
+            .padding(toolbarAtTop ? .top : .bottom, 8)
+        }
     }
 
     // The visible surface beneath the (clear) PKCanvasView. Driven ONLY by the
@@ -353,6 +388,10 @@ struct CanvasScreen: View {
             Color(UIColor(white: 0.11, alpha: 1.0))
         case .light:
             Color.white
+        case .lines:
+            RuledPaper(spacing: 34, showVertical: false)
+        case .grid:
+            RuledPaper(spacing: 28, showVertical: true)
         }
     }
 
@@ -360,67 +399,75 @@ struct CanvasScreen: View {
 
     private var toolbar: some View {
         OrgPadGlassContainer(spacing: 12) {
-            HStack(spacing: 14) {
-                // Leading: cancel + background picker
+            HStack(spacing: 10) {
+                // Fixed left: cancel, collapse, and move-to-other-edge.
                 Button(role: .cancel) { Task { await model.cancel() } } label: {
-                    Label("Cancel", systemImage: "xmark")
-                        .labelStyle(.iconOnly)
-                        .frame(width: 34, height: 34)
+                    Image(systemName: "xmark").frame(width: 34, height: 34)
                 }
                 .orgPadGlassButton()
 
-                backgroundMenu
+                Button { withAnimation(.easeInOut(duration: 0.2)) { toolbarCollapsed = true } } label: {
+                    Image(systemName: toolbarAtTop ? "chevron.up" : "chevron.down")
+                        .frame(width: 30, height: 34)
+                }
+                .orgPadGlassButton()
+
+                Button { withAnimation(.easeInOut(duration: 0.2)) { toolbarAtTop.toggle() } } label: {
+                    Image(systemName: toolbarAtTop ? "arrow.down.to.line" : "arrow.up.to.line")
+                        .frame(width: 30, height: 34)
+                }
+                .orgPadGlassButton()
 
                 Divider().frame(height: 24)
 
-                // Center: undo / redo (prominent, Notes-like)
-                Button { model.undo(); toolbarTick += 1 } label: {
-                    Image(systemName: "arrow.uturn.backward").frame(width: 34, height: 34)
-                }
-                .orgPadGlassButton()
-                .disabled(!model.canUndo)
+                // Scrollable middle: the rest of the tools, so a narrow (portrait)
+                // width never overflows or pushes the bar out of place.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        backgroundMenu
 
-                Button { model.redo(); toolbarTick += 1 } label: {
-                    Image(systemName: "arrow.uturn.forward").frame(width: 34, height: 34)
+                        Button { model.undo(); toolbarTick += 1 } label: {
+                            Image(systemName: "arrow.uturn.backward").frame(width: 34, height: 34)
+                        }
+                        .orgPadGlassButton().disabled(!model.canUndo)
+
+                        Button { model.redo(); toolbarTick += 1 } label: {
+                            Image(systemName: "arrow.uturn.forward").frame(width: 34, height: 34)
+                        }
+                        .orgPadGlassButton().disabled(!model.canRedo)
+
+                        smartToggle(on: $model.snapShapes, symbol: "scribble.variable", title: "Snap")
+                        smartToggle(on: $model.smoothInk, symbol: "wand.and.stars", title: "Smooth")
+
+                        Toggle(isOn: $allowsFingerDrawing) {
+                            Image(systemName: "hand.point.up.left")
+                        }
+                        .toggleStyle(.button).orgPadGlassButton()
+                    }
+                    .padding(.horizontal, 2)
                 }
-                .orgPadGlassButton()
-                .disabled(!model.canRedo)
 
                 Divider().frame(height: 24)
 
-                // Smart-ink toggles
-                smartToggle(on: $model.snapShapes, symbol: "scribble.variable", title: "Snap")
-                smartToggle(on: $model.smoothInk, symbol: "wand.and.stars", title: "Smooth")
-
-                Divider().frame(height: 24)
-
-                Toggle(isOn: $allowsFingerDrawing) {
-                    Image(systemName: "hand.point.up.left")
-                }
-                .toggleStyle(.button)
-                .orgPadGlassButton()
-
-                Spacer(minLength: 8)
-
-                // Trailing: primary action
+                // Fixed right: primary action, always reachable.
                 Button { Task { await model.done() } } label: {
                     if model.isUploading {
-                        ProgressView().frame(width: 60, height: 34)
+                        ProgressView().frame(width: 54, height: 34)
                     } else {
                         Label("Done", systemImage: "checkmark")
-                            .frame(height: 34).padding(.horizontal, 8)
+                            .frame(height: 34).padding(.horizontal, 6)
                     }
                 }
                 .orgPadGlassProminentButton()
                 .disabled(model.isUploading)
                 .tint(.accentColor)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .orgPadGlassCapsule()
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .id(toolbarTick)   // recompute disabled(undo/redo) after actions
     }
 
@@ -474,6 +521,39 @@ struct CanvasScreen: View {
 /// A subtle checkerboard drawn behind a transparent-export canvas so the artist
 /// sees a neutral mid-tone (never invisible ink) and understands the export
 /// will have no baked background.
+/// Ruled notebook paper (horizontal lines) or graph paper (add verticals) on a
+/// light "paper" base, to help align handwriting. A visual surface aid only —
+/// it is not baked into the exported PNG.
+private struct RuledPaper: View {
+    let spacing: CGFloat
+    let showVertical: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            // Paper base.
+            context.fill(Path(CGRect(origin: .zero, size: size)),
+                         with: .color(Color(white: 0.99)))
+            let rule = Color(red: 0.62, green: 0.74, blue: 0.88).opacity(0.65)
+            var line = StrokeStyle(lineWidth: 1)
+            line.lineCap = .butt
+            var y = spacing
+            while y < size.height {
+                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(p, with: .color(rule), style: line)
+                y += spacing
+            }
+            if showVertical {
+                var x = spacing
+                while x < size.width {
+                    var p = Path(); p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height))
+                    context.stroke(p, with: .color(rule), style: line)
+                    x += spacing
+                }
+            }
+        }
+    }
+}
+
 private struct TransparentCheckerboard: View {
     var body: some View {
         Canvas { context, size in
