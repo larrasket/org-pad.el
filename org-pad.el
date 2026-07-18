@@ -1088,25 +1088,28 @@ shipped web/canvas.html reads: `session_id', `token', `mode', `name',
 convenience aliases `result_path'/`cancel_path'/`token_header'.
 RESULT-URL/CANCEL-URL default to the relative \"/result\"/\"/cancel\" (the canvas
 falls back to these too); pass absolute URLs when the browser's origin differs."
-  (concat
-   "<script>window.ORGPAD_CONFIG="
-   (json-serialize
-    (list :session_id (or session-id "")
-          :token (or token "")
-          :mode (or mode "new")
-          :name (or name "")
-          :background (or background "transparent")
-          ;; The canvas reads cfg.resultUrl (camelCase); keep result_path as an alias.
-          :resultUrl (or result-url "/result")
-          :result_path "/result"
-          :cancel_path (or cancel-url "/cancel")
-          :session_path "/session"
-          :pair_path "/pair"
-          :token_header "X-OrgPad-Token"
-          :format "web"
-          :drawing (if (and web-json (stringp web-json) (not (string-empty-p web-json)))
-                       web-json :null)))
-   ";</script>"))
+  (let ((json (json-serialize
+               (list :session_id (or session-id "")
+                     :token (or token "")
+                     :mode (or mode "new")
+                     :name (or name "")
+                     :background (or background "transparent")
+                     ;; The canvas reads cfg.resultUrl (camelCase); keep result_path as an alias.
+                     :resultUrl (or result-url "/result")
+                     :result_path "/result"
+                     :cancel_path (or cancel-url "/cancel")
+                     :session_path "/session"
+                     :pair_path "/pair"
+                     :token_header "X-OrgPad-Token"
+                     :format "web"
+                     :drawing (if (and web-json (stringp web-json) (not (string-empty-p web-json)))
+                                  web-json :null)))))
+    ;; Escape < and > so a string field (e.g. a figure name containing the text
+    ;; "</script>") cannot break out of this inline <script> element.  These
+    ;; become < / >, which JS reads back as the original characters.
+    (setq json (replace-regexp-in-string "<" "\\u003c" json t t))
+    (setq json (replace-regexp-in-string ">" "\\u003e" json t t))
+    (concat "<script>window.ORGPAD_CONFIG=" json ";</script>")))
 
 (defun org-pad--canvas-fallback-html ()
   "Minimal self-contained canvas HTML used when the shipped file is absent.

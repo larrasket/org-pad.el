@@ -242,10 +242,12 @@ rawCfg = {
   cancel_path: rawCfg.cancel_path,
   session_id: rawCfg.session_id || qs.get("session") || qs.get("session_id") || null,
   token: rawCfg.token || qs.get("token") || null,
-  mode: rawCfg.mode || qs.get("mode") || "new",
-  name: rawCfg.name || qs.get("name") || "",
+  // Defaults for mode/name/background are owned solely by resolveConfig; here
+  // we only fold in the URL query-string fallbacks.
+  mode: rawCfg.mode || qs.get("mode"),
+  name: rawCfg.name || qs.get("name"),
   drawing: (rawCfg.drawing !== undefined && rawCfg.drawing !== null) ? rawCfg.drawing : qs.get("drawing"),
-  background: rawCfg.background || qs.get("background") || "transparent",
+  background: rawCfg.background || qs.get("background"),
   resultUrl: rawCfg.resultUrl
 };
 
@@ -266,7 +268,9 @@ function resolveConfig(cfg, stored) {
     token_header: cfg.token_header || "X-OrgPad-Token",
     pair_path: cfg.pair_path || "/pair",
     session_path: cfg.session_path || "/session",
-    result_path: cfg.resultUrl || cfg.result_path || "/result",
+    // Prefer the relative /result (same origin the page loaded from) over any
+    // injected absolute resultUrl, which can go stale across an IP change.
+    result_path: cfg.result_path || cfg.resultUrl || "/result",
     cancel_path: cfg.cancel_path || "/cancel"
   };
 }
@@ -339,14 +343,28 @@ async function exportResult() {
   var snapshot = getSnapshot(editor.store);
   var png = "";
   if (ids.length) {
-    var bake = CONFIG.background && CONFIG.background !== "transparent";
-    var out = await editor.toImage(ids, {
-      format: "png", background: bake, scale: 2, padding: 16,
-      darkMode: CONFIG.background === "dark"
-    });
-    png = await blobToB64(out.blob);
+    // Export ink on a transparent background, then bake the requested figure
+    // background underneath. tldraw's toImage `background` is only a boolean,
+    // so it can't honor "light"/"dark"/a custom color — composite it ourselves.
+    var out = await editor.toImage(ids, { format: "png", background: false, scale: 2, padding: 16 });
+    var blob = out.blob;
+    var bg = CONFIG.background;
+    if (bg && bg !== "transparent") {
+      var color = (bg === "light" || bg === "white") ? "#ffffff" : (bg === "dark" ? "#0b0d10" : bg);
+      blob = await bakeBackground(blob, color);
+    }
+    png = await blobToB64(blob);
   }
   return { png: png, drawing: JSON.stringify(snapshot), shapes: ids.length };
+}
+async function bakeBackground(blob, color) {
+  var bmp = await createImageBitmap(blob);
+  var c = document.createElement("canvas");
+  c.width = bmp.width; c.height = bmp.height;
+  var g = c.getContext("2d");
+  g.fillStyle = color; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(bmp, 0, 0);
+  return await new Promise(function (res) { c.toBlob(res, "image/png"); });
 }
 
 // Mount tldraw. Drop in a tldraw license key (window.ORGPAD_TLDRAW_LICENSE, or a
@@ -416,8 +434,13 @@ function onTokenRejected() {
 
 function parseSessionResponse(obj) {
   var mode = obj.mode || "new";
+  var format = obj.format || "web";
   var restore = null;
-  if (mode === "edit" && obj.drawing) { try { restore = b64ToUtf8(obj.drawing); } catch (e) {} }
+  // Only web-canvas snapshots are restorable here; a native pkdrawing figure's
+  // bytes are not a tldraw snapshot, so leave the surface blank for those.
+  if (mode === "edit" && obj.drawing && format === "web") {
+    try { restore = b64ToUtf8(obj.drawing); } catch (e) {}
+  }
   return { sessionID: obj.session_id, mode: mode, name: obj.name || "", background: obj.background || "transparent", restore: restore };
 }
 
@@ -428,12 +451,20 @@ async function pollOnce(myGen) {
   pollAbort = controller;
   var headers = {}; headers[CONFIG.token_header] = CONFIG.token;
   var timer = controller ? setTimeout(function () { controller.abort(); }, LONGPOLL_TIMEOUT_MS) : null;
+  var started = Date.now();
   try {
     var res = await fetch(CONFIG.session_path, { method: "GET", headers: headers, signal: controller ? controller.signal : undefined });
     if (timer) clearTimeout(timer);
     if (myGen !== pollGeneration) return;
     if (res.status === 200) { var j = await res.json(); backoffReset(); enterDrawingForSession(parseSessionResponse(j)); return; }
-    if (res.status === 204) { backoffReset(); pollOnce(myGen); return; }
+    if (res.status === 204) {
+      backoffReset();
+      // A real long-poll holds ~55s; if the server answered 204 immediately,
+      // throttle to avoid a tight request loop against a non-holding server.
+      if (Date.now() - started < 1000) setTimeout(function () { if (myGen === pollGeneration) pollOnce(myGen); }, 1000);
+      else pollOnce(myGen);
+      return;
+    }
     if (res.status === 401) { onTokenRejected(); return; }
     scheduleRetry(myGen);
   } catch (e) {
@@ -522,8 +553,12 @@ var unpairBtn = el("btnUnpair"); if (unpairBtn) unpairBtn.addEventListener("clic
 
 // Demo/per-session: draw immediately. Receiver: pair or wait.
 if (CONFIG.screen === "drawing") {
-  if (CONFIG.mode === "edit" && CONFIG.drawing) { applyDrawing(b64ToUtf8(CONFIG.drawing)); setStatus("editing " + (CONFIG.name || "")); }
-  else { setStatus(DEMO ? "demo" : "new figure"); }
+  if (CONFIG.mode === "edit" && CONFIG.drawing) {
+    var initial = null;
+    try { initial = b64ToUtf8(CONFIG.drawing); } catch (e) { initial = null; }  // malformed drawing => blank, never crash boot
+    applyDrawing(initial);
+    setStatus("editing " + (CONFIG.name || ""));
+  } else { setStatus(DEMO ? "demo" : "new figure"); }
   showScreen(null);
 } else if (CONFIG.screen === "waiting") {
   enterWaiting();

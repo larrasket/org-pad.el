@@ -110,7 +110,8 @@ console.log("== receiver: pair -> wait -> draw -> Done ==");
 // + a relative result_path alias) so we exercise the real precedence.
 server.config = { token_header: "X-OrgPad-Token", pair_path: "/pair", session_path: "/session",
                   resultUrl: ORIGIN + "/result", result_path: "/result", cancel_path: "/cancel", format: "web" };
-server.sessionPayload = { session_id: "s-new", mode: "new", name: "", background: "transparent", format: "web" };
+// custom color background exercises the exportResult -> bakeBackground composite path
+server.sessionPayload = { session_id: "s-new", mode: "new", name: "", background: "#204030", format: "web" };
 server.sessionCallsUntilReady = 2;   // one 204, then the 200
 server.sessionCalls = 0; server.resultBody = null; server.pairBody = null;
 
@@ -131,7 +132,7 @@ let snapshotB64 = null;
   const shapes = await page.evaluate(() => window.__orgpad.editor.getCurrentPageShapeIds().size);
   t("a stroke was drawn on the tldraw surface", shapes >= 1);
   await page.click("#btnDone");
-  await page.waitForTimeout(800);
+  for (let i = 0; i < 200 && !server.resultBody; i++) await new Promise((r) => setTimeout(r, 50)); // wait for the actual POST
   const rb = server.resultBody;
   t("POST /result received", !!rb);
   t("/result carries session_id + format:web", rb && rb.session_id === "s-new" && rb.format === "web");
