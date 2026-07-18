@@ -525,28 +525,32 @@ struct CanvasScreen: View {
 /// light "paper" base, to help align handwriting. A visual surface aid only —
 /// it is not baked into the exported PNG.
 private struct RuledPaper: View {
+    @Environment(\.colorScheme) private var scheme
     let spacing: CGFloat
     let showVertical: Bool
 
     var body: some View {
-        Canvas { context, size in
-            // Paper base.
-            context.fill(Path(CGRect(origin: .zero, size: size)),
-                         with: .color(Color(white: 0.99)))
-            let rule = Color(red: 0.62, green: 0.74, blue: 0.88).opacity(0.65)
-            var line = StrokeStyle(lineWidth: 1)
-            line.lineCap = .butt
+        // Theme-aware: light paper + blue rules in light mode; dark paper + light
+        // rules in dark mode — so it changes visibly and works with dark too.
+        let dark = scheme == .dark
+        let paper = dark ? Color(white: 0.13) : Color(white: 0.99)
+        let rule = dark
+            ? Color.white.opacity(0.28)
+            : Color(red: 0.20, green: 0.42, blue: 0.85).opacity(0.55)
+        return Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(paper))
+            let style = StrokeStyle(lineWidth: 1)
             var y = spacing
             while y < size.height {
                 var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(p, with: .color(rule), style: line)
+                context.stroke(p, with: .color(rule), style: style)
                 y += spacing
             }
             if showVertical {
                 var x = spacing
                 while x < size.width {
                     var p = Path(); p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height))
-                    context.stroke(p, with: .color(rule), style: line)
+                    context.stroke(p, with: .color(rule), style: style)
                     x += spacing
                 }
             }
