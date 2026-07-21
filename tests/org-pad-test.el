@@ -364,15 +364,20 @@
 
 ;;;; Infra: /setup + /app
 (ert-deftest org-pad-setup-html-has-app-link ()
-  (let ((html (org-pad--setup-html "mymac.local:8777")))
+  (let ((html (org-pad--setup-html "http://mymac.local:8777/app")))
     (should (string-match-p "http://mymac.local:8777/app" html))
     (should (string-match-p "Swift Playgrounds" html))))
-(ert-deftest org-pad-handle-app-404-when-missing ()
-  (let ((org-pad--package-dir (make-temp-file "opkg" t)) (resp nil))
+(ert-deftest org-pad-handle-app-redirects-when-missing ()
+  "With no bundled app, /app 302-redirects to `org-pad-app-download-url'."
+  (let ((org-pad--package-dir (make-temp-file "opkg" t))
+        (org-pad-app-download-url "https://example.test/OrgPad.swiftpm.zip")
+        (resp nil))
     (unwind-protect
         (cl-letf (((symbol-function 'org-pad--respond) (lambda (&rest a) (setq resp a))))
           (org-pad--handle-app (list :proc nil))
-          (should (= (nth 1 resp) 404)))
+          (should (= (nth 1 resp) 302))
+          (should (equal (cdr (assoc "Location" (nth 4 resp)))
+                         "https://example.test/OrgPad.swiftpm.zip")))
       (delete-directory org-pad--package-dir t))))
 
 ;;;; Commands

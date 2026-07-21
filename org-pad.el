@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Saleh
 
 ;; Author: Saleh <root@lr0.org>
+;; Maintainer: Saleh <root@lr0.org>
 ;; Version: 0.2.0
 ;; Package-Requires: ((emacs "28.1"))
 ;; Keywords: org, multimedia, hypermedia
@@ -39,7 +40,7 @@
 (require 'transient)
 
 (defgroup org-pad nil
-  "Seamless iPad drawing into org-mode."
+  "Seamless iPad drawing into Org mode."
   :group 'org
   :prefix "org-pad-")
 
@@ -114,19 +115,19 @@ Return a 32-bit unsigned integer.  Matches Python `zlib.crc32'."
 
 (defun org-pad--png-chunks (bytes)
   "Walk PNG unibyte string BYTES, returning a list of chunk descriptor plists:
-(:type STR :data-start INT :data-len INT :chunk-start INT :chunk-end INT).
+\(:type STR :data-start INT :data-len INT :chunk-start INT :chunk-end INT).
 Signal an error on a bad signature or truncation."
   (unless (and (>= (length bytes) 8)
                (string= (substring bytes 0 8) org-pad--png-signature))
-    (error "org-pad: not a PNG (bad signature)"))
+    (error "Org-pad: not a PNG (bad signature)"))
   (let ((pos 8) (len (length bytes)) (chunks '()))
     (while (< pos len)
-      (when (> (+ pos 8) len) (error "org-pad: truncated PNG chunk header at %d" pos))
+      (when (> (+ pos 8) len) (error "Org-pad: truncated PNG chunk header at %d" pos))
       (let* ((data-len (org-pad--u32-decode bytes pos))
              (type (substring bytes (+ pos 4) (+ pos 8)))
              (data-start (+ pos 8))
              (chunk-end (+ data-start data-len 4)))
-        (when (> chunk-end len) (error "org-pad: truncated PNG chunk %s at %d" type pos))
+        (when (> chunk-end len) (error "Org-pad: truncated PNG chunk %s at %d" type pos))
         (push (list :type type :data-start data-start :data-len data-len
                     :chunk-start pos :chunk-end chunk-end)
               chunks)
@@ -145,9 +146,9 @@ Signal an error on a bad signature or truncation."
 (defun org-pad--status-text (status)
   "Return the HTTP reason phrase for numeric STATUS."
   (pcase status
-    (200 "OK") (204 "No Content") (400 "Bad Request") (401 "Unauthorized")
-    (404 "Not Found") (405 "Method Not Allowed") (413 "Payload Too Large")
-    (500 "Internal Server Error") (_ "Status")))
+    (200 "OK") (204 "No Content") (302 "Found") (400 "Bad Request")
+    (401 "Unauthorized") (404 "Not Found") (405 "Method Not Allowed")
+    (413 "Payload Too Large") (500 "Internal Server Error") (_ "Status")))
 
 (defun org-pad--safe-delete (proc)
   "Delete PROC if live, ignoring errors."
@@ -229,7 +230,8 @@ HEADERS an alist of extra (NAME . VALUE).  Content-Length is always sent."
     ('done    nil)))
 
 (defun org-pad--try-parse-headers (proc st)
-  "Parse the header block from ST if complete; advance to body."
+  "Parse the header block from ST if complete; advance to body.
+PROC is the connection process to respond on."
   (let* ((buf (plist-get st :buf)) (sep (string-search "\r\n\r\n" buf)))
     (when sep
       (let* ((head (substring buf 0 sep)) (nl (string-search "\r\n" head))
@@ -254,7 +256,8 @@ HEADERS an alist of extra (NAME . VALUE).  Content-Length is always sent."
                   (org-pad--try-parse-body proc st))))))))))
 
 (defun org-pad--try-parse-body (proc st)
-  "Collect Content-Length bytes of body and dispatch when complete."
+  "Collect Content-Length bytes of body and dispatch when complete.
+PROC is the connection process and ST its parse state."
   (let* ((buf (plist-get st :buf)) (start (plist-get st :header-end))
          (clen (plist-get st :content-length)) (have (- (length buf) start)))
     (when (>= have clen)
@@ -283,7 +286,9 @@ ON-TIMEOUT with PROC, else send 204.  Return the timer."
     timer))
 
 (defun org-pad-answer (proc status content-type body &optional headers)
-  "Answer a parked long-poll PROC, disarming its deadline timer."
+  "Answer a parked long-poll PROC, disarming its deadline timer.
+STATUS, CONTENT-TYPE, BODY and HEADERS are passed through to
+`org-pad--respond'."
   (let ((timer (process-get proc :org-pad-timer)))
     (when timer (cancel-timer timer)))
   (process-put proc :org-pad-timer nil)
@@ -299,7 +304,8 @@ ON-TIMEOUT with PROC, else send 204.  Return the timer."
 (defvar org-pad--session-waiters nil "Parked long-poll connection processes.")
 
 (defun org-pad--sentinel (proc _event)
-  "Connection sentinel: clean up parked timers and waiters on disconnect."
+  "Connection sentinel: clean up parked timers and waiters on disconnect.
+PROC is the connection process whose state is cleaned up."
   (unless (process-live-p proc)
     (let ((timer (process-get proc :org-pad-timer)))
       (when timer (cancel-timer timer) (process-put proc :org-pad-timer nil)))
@@ -315,7 +321,7 @@ ON-TIMEOUT with PROC, else send 204.  Return the timer."
 
 (defun org-pad--server-start (&optional port)
   "Start the org-pad HTTP server on PORT (default `org-pad-port').  Return the process."
-  (when (process-live-p org-pad--server-process) (error "org-pad server already running"))
+  (when (process-live-p org-pad--server-process) (error "Org-pad server already running"))
   (setq org-pad--server-process
         (make-network-process
          :name "org-pad-server" :server t :host "0.0.0.0" :service (or port org-pad-port)
@@ -339,20 +345,33 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
 
 (defvar org-pad--queue nil "FIFO list of `org-pad-session' structs; head is served first.")
 
-(defun org-pad--queue-reset () (setq org-pad--queue nil))
-(defun org-pad-enqueue (session) (setq org-pad--queue (append org-pad--queue (list session))) session)
-(defun org-pad-queue-head () (car org-pad--queue))
-(defun org-pad--queue-find (id) (cl-find id org-pad--queue :key #'org-pad-session-id :test #'equal))
+(defun org-pad--queue-reset ()
+  "Empty the session queue."
+  (setq org-pad--queue nil))
+(defun org-pad-enqueue (session)
+  "Append SESSION to the tail of the queue and return it."
+  (setq org-pad--queue (append org-pad--queue (list session))) session)
+(defun org-pad-queue-head ()
+  "Return the session at the head of the queue, or nil."
+  (car org-pad--queue))
+(defun org-pad--queue-find (id)
+  "Return the queued session whose id is ID, or nil."
+  (cl-find id org-pad--queue :key #'org-pad-session-id :test #'equal))
 (defun org-pad-queue-complete (id)
+  "Remove the session with id ID from the queue and return it."
   (let ((s (org-pad--queue-find id)))
     (when s (setq org-pad--queue (delq s org-pad--queue))) s))
 (defun org-pad-queue-cancel (id)
+  "Remove the session with id ID from the queue, releasing its marker.
+Return the removed session, or nil."
   (let ((s (org-pad--queue-find id)))
     (when s
       (when (markerp (org-pad-session-marker s)) (set-marker (org-pad-session-marker s) nil))
       (setq org-pad--queue (delq s org-pad--queue)))
     s))
-(defun org-pad-queue-length () (length org-pad--queue))
+(defun org-pad-queue-length ()
+  "Return the number of sessions currently in the queue."
+  (length org-pad--queue))
 
 (defun org-pad--random-bytes (n)
   "Return N cryptographically-random bytes (unibyte).  Prefers /dev/urandom."
@@ -366,12 +385,19 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
       ;; Fallback: NOT cryptographically strong (Emacs `random' PRNG).
       (let ((s (make-string n 0))) (dotimes (i n) (aset s i (random 256))) s)))
 
-(defun org-pad--hex (bytes) (mapconcat (lambda (b) (format "%02x" b)) bytes ""))
+(defun org-pad--hex (bytes)
+  "Return the lowercase hexadecimal encoding of unibyte string BYTES."
+  (mapconcat (lambda (b) (format "%02x" b)) bytes ""))
 (defun org-pad--random-uint (n)
+  "Return an unsigned integer built from N random bytes."
   (let ((bytes (org-pad--random-bytes n)) (acc 0))
     (dotimes (i (length bytes)) (setq acc (+ (* acc 256) (aref bytes i)))) acc))
-(defun org-pad-generate-id () (org-pad--hex (org-pad--random-bytes 16)))
-(defun org-pad-generate-token () (org-pad--hex (org-pad--random-bytes 16)))
+(defun org-pad-generate-id ()
+  "Return a fresh random 32-hex-character session id."
+  (org-pad--hex (org-pad--random-bytes 16)))
+(defun org-pad-generate-token ()
+  "Return a fresh random 32-hex-character pairing token."
+  (org-pad--hex (org-pad--random-bytes 16)))
 
 (cl-defstruct (org-pad-pairing (:constructor org-pad-pairing--make) (:copier nil))
   code (attempts-left 5) active)
@@ -382,7 +408,9 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
   (let ((code (format "%06d" (mod (org-pad--random-uint 3) 1000000))))
     (setq org-pad--pairing (org-pad-pairing--make :code code :attempts-left 5 :active t))
     code))
-(defun org-pad-pairing-stop () (setq org-pad--pairing nil))
+(defun org-pad-pairing-stop ()
+  "End the current pairing session, clearing its state."
+  (setq org-pad--pairing nil))
 
 (defun org-pad-pairing-verify (code)
   "Verify CODE.  Return (:ok . TOKEN) / (:bad . N-left) / :closed."
@@ -404,11 +432,13 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
     (write-region (concat token "\n") nil org-pad-token-file 'append 'silent))
   token)
 (defun org-pad--load-tokens ()
+  "Return the list of persisted tokens from `org-pad-token-file'."
   (when (file-readable-p org-pad-token-file)
     (with-temp-buffer
       (let ((coding-system-for-read 'utf-8-unix)) (insert-file-contents org-pad-token-file))
       (cl-remove-if #'string-empty-p (mapcar #'string-trim (split-string (buffer-string) "\n"))))))
 (defun org-pad-token-valid-p (token)
+  "Return non-nil if TOKEN is a non-empty string present in the token file."
   (and (stringp token) (not (string-empty-p token)) (member token (org-pad--load-tokens)) t))
 
 ;;;; Org integration ------------------------------------------------------
@@ -427,13 +457,15 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
 
 (defun org-pad-dwim-at-point ()
   "Classify point for `org-pad-draw': (:edit FILE DRAWING) or (:new MARKER)."
-  (unless (derived-mode-p 'org-mode) (user-error "org-pad: not an org-mode buffer"))
-  (unless (buffer-file-name) (user-error "org-pad: buffer is not visiting a file"))
+  (unless (derived-mode-p 'org-mode) (user-error "Org-pad: not an Org buffer"))
+  (unless (buffer-file-name) (user-error "Org-pad: buffer is not visiting a file"))
   (let* ((file (org-pad--link-file-at-point))
          (drawing (and file (org-pad--file-has-drawing-p file))))
     (if drawing (list :edit file drawing) (list :new (org-pad--make-insertion-marker)))))
 
-(defun org-pad-default-file-name () (format-time-string "fig-%Y%m%d-%H%M%S.png"))
+(defun org-pad-default-file-name ()
+  "Return a timestamped default PNG file name for a new figure."
+  (format-time-string "fig-%Y%m%d-%H%M%S.png"))
 
 (defun org-pad-resolve-directory (org-file)
   "Absolute figures dir for ORG-FILE, created on demand."
@@ -441,6 +473,7 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
     (unless (file-directory-p dir) (make-directory dir t)) dir))
 
 (defun org-pad--link-for (org-file target-file)
+  "Return an Org `file:' link to TARGET-FILE relative to ORG-FILE."
   (format "[[file:%s]]" (file-relative-name target-file (file-name-directory org-file))))
 
 (defun org-pad--refresh-inline-images (file)
@@ -479,7 +512,8 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
       (setq org-pad--session-waiters nil))))
 
 (defun org-pad--handle-pair (req)
-  "POST /pair: verify the 6-digit code, issue a token."
+  "POST /pair: verify the 6-digit code, issue a token.
+REQ is the parsed request plist."
   (let* ((proc (plist-get req :proc)) (body (org-pad--parse-json-body req))
          (code (and body (gethash "code" body)))
          (result (and code (org-pad-pairing-verify code))))
@@ -490,7 +524,8 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
       (_ (org-pad--respond proc 401 "text/plain" "Pairing failed")))))
 
 (defun org-pad--handle-session (req)
-  "GET /session: deliver the head session now, or park until one arrives."
+  "GET /session: deliver the head session now, or park until one arrives.
+REQ is the parsed request plist."
   (when (org-pad--require-token req)
     (let ((proc (plist-get req :proc)) (head (org-pad-queue-head)))
       (if head
@@ -502,7 +537,8 @@ nothing lingers (bounded to 55s otherwise) after shutdown."
                         (org-pad--respond p 204 nil nil)))))))
 
 (defun org-pad--handle-cancel (req)
-  "POST /cancel: drop the named session from the queue."
+  "POST /cancel: drop the named session from the queue.
+REQ is the parsed request plist."
   (when (org-pad--require-token req)
     (let* ((proc (plist-get req :proc)) (body (org-pad--parse-json-body req))
            (id (and body (gethash "session_id" body))))
@@ -551,8 +587,9 @@ IP address, so URLs built from them keep working across DHCP / network changes
   org-pad--local-hostname-cache)
 
 (defun org-pad--host-candidates ()
-  "Hosts for building setup/receiver URLs: the mDNS `.local' name FIRST
-\(IP-change-proof), then the LAN IPv4 addresses as fallbacks."
+  "Return the hosts used to build setup and receiver URLs.
+The mDNS `.local' name comes FIRST (IP-change-proof), then the LAN IPv4
+addresses as fallbacks."
   (let ((local (org-pad--local-hostname)))
     (append (and local (list local)) (org-pad--ipv4-addresses))))
 
@@ -604,8 +641,27 @@ avahi-utils on Linux); the printed setup URL still works")
                     (let ((coding-system-for-read 'binary)) (insert-file-contents-literally path))
                     (buffer-string)))
 
-(defun org-pad--setup-html (host)
-  "Return the /setup install-page HTML for HOST (a \"host:port\" string)."
+(defcustom org-pad-app-download-url
+  "https://github.com/larrasket/org-pad.el/raw/HEAD/OrgPad.swiftpm.zip"
+  "URL the iPad app (OrgPad.swiftpm.zip) is downloaded from when unbundled.
+A package installed from an ELPA (e.g. MELPA) ships
+only the Elisp and the web canvas, not the Swift app, so the /setup page and
+/app endpoint fall back to this URL.  When the OrgPad.swiftpm sources (or a
+prebuilt zip) ARE present next to this file, the local copy is served instead."
+  :type 'string :group 'org-pad)
+
+(defun org-pad--local-app-zip ()
+  "Return a readable local OrgPad.swiftpm.zip path, or nil when none is bundled.
+Rebuilds the zip from bundled OrgPad.swiftpm sources when present, otherwise
+returns an existing prebuilt zip if one sits next to this package."
+  (or (org-pad--ensure-app-zip)
+      (let ((zip (expand-file-name "OrgPad.swiftpm.zip" org-pad--package-dir)))
+        (and (file-readable-p zip) zip))))
+
+(defun org-pad--setup-html (app-url)
+  "Return the /setup install-page HTML.
+APP-URL is the href of the app download button (a local /app URL when the app
+is bundled, else `org-pad-app-download-url')."
   (concat
    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -618,14 +674,20 @@ avahi-utils on Linux); the printed setup URL still works")
    "<li>Install <strong>Swift Playgrounds</strong> from the App Store.</li>"
    "<li>Download the app below and open it in Playgrounds (Files unzips on tap).</li>"
    "<li>Tap <strong>Run</strong>, then enter the 6-digit code Emacs shows.</li></ol>"
-   (format "<p><a class=\"btn\" href=\"http://%s/app\">Download OrgPad.swiftpm.zip</a></p>" host)
+   (format "<p><a class=\"btn\" href=\"%s\">Download OrgPad.swiftpm.zip</a></p>" app-url)
    "</body></html>"))
 
 (defun org-pad--handle-setup (req)
-  "GET /setup: serve the install page, linking /app on the request's Host."
-  (let ((host (or (org-pad--header req "host") (format "127.0.0.1:%d" org-pad-port))))
+  "GET /setup: serve the install page.
+REQ is the parsed request plist.
+The app button points at the local /app endpoint when the app is bundled, else
+at `org-pad-app-download-url'."
+  (let* ((host (or (org-pad--header req "host") (format "127.0.0.1:%d" org-pad-port)))
+         (app-url (if (org-pad--local-app-zip)
+                      (format "http://%s/app" host)
+                    org-pad-app-download-url)))
     (org-pad--respond (plist-get req :proc) 200 "text/html; charset=utf-8"
-                      (encode-coding-string (org-pad--setup-html host) 'utf-8))))
+                      (encode-coding-string (org-pad--setup-html app-url) 'utf-8))))
 
 (defun org-pad--ensure-app-zip ()
   "Rebuild OrgPad.swiftpm.zip from the OrgPad.swiftpm/ sources when they are present.
@@ -646,13 +708,17 @@ Return the zip path when a rebuild happened, else nil."
       (and (file-readable-p zip) zip))))
 
 (defun org-pad--handle-app (req)
-  "GET /app: serve OrgPad.swiftpm.zip as application/zip."
+  "GET /app: serve the bundled OrgPad.swiftpm.zip, or redirect to the download URL.
+REQ is the parsed request plist.
+When no app is bundled (an ELPA install ships only Elisp + web canvas), redirect
+to `org-pad-app-download-url' so the iPad can still fetch the app."
   (let ((proc (plist-get req :proc))
-        (zip (expand-file-name "OrgPad.swiftpm.zip" org-pad--package-dir)))
-    (if (file-readable-p zip)
+        (zip (org-pad--local-app-zip)))
+    (if zip
         (org-pad--respond proc 200 "application/zip" (org-pad--read-file-unibyte zip)
                           '(("Content-Disposition" . "attachment; filename=\"OrgPad.swiftpm.zip\"")))
-      (org-pad--respond proc 404 "text/plain" "OrgPad.swiftpm.zip not found (run `make app-zip')"))))
+      (org-pad--respond proc 302 nil nil
+                        (list (cons "Location" org-pad-app-download-url))))))
 
 ;;;; Commands --------------------------------------------------------------
 
@@ -675,7 +741,6 @@ Return the zip path when a rebuild happened, else nil."
   (message "org-pad: server stopped"))
 
 ;;;###autoload
-;;;###autoload
 (defun org-pad-edit ()
   "Explicitly re-edit the org-pad figure at point.
 Signal a clear error if point is on a foreign PNG (no embedded strokes, so not
@@ -685,9 +750,9 @@ re-editable — spec error row) or not on a figure at all."
     (unless (eq (car dwim) :edit)
       (let ((file (org-pad--link-file-at-point)))
         (if (and file (string-suffix-p ".png" (downcase file)))
-            (user-error "org-pad: %s has no embedded strokes; not re-editable (foreign PNG)"
+            (user-error "Org-pad: %s has no embedded strokes; not re-editable (foreign PNG)"
                         (file-name-nondirectory file))
-          (user-error "org-pad: point is not on an org-pad figure"))))
+          (user-error "Org-pad: point is not on an org-pad figure"))))
     (org-pad-draw)))
 
 ;;;###autoload
@@ -735,9 +800,9 @@ re-editable — spec error row) or not on a figure at all."
 ;; Named formats.  #x01 keeps the value the v1 `org-pad--png-chunk-version'
 ;; constant already had, so wire bytes for PKDrawing figures are identical.
 (defconst org-pad-format-pkdrawing #x01
-  "orPd chunk FORMAT byte for Apple PKDrawing stroke bytes (v1, unchanged).")
+  "Chunk FORMAT byte identifying Apple PKDrawing stroke bytes (v1, unchanged).")
 (defconst org-pad-format-web #x02
-  "orPd chunk FORMAT byte for web-canvas JSON stroke data (UTF-8).")
+  "Chunk FORMAT byte identifying web-canvas JSON stroke data (UTF-8).")
 
 (defun org-pad-format-valid-p (format)
   "Return non-nil if FORMAT is a known orPd chunk format byte."
@@ -761,10 +826,10 @@ two-argument callers produce byte-identical output to v1.  Both PNG-BYTES and
 DRAWING-BYTES must be unibyte.  Any existing `orPd' chunk is removed first."
   (let ((format (or format org-pad-format-pkdrawing)))
     (unless (and (integerp format) (<= 0 format 255))
-      (error "org-pad: bad orPd format byte: %S" format))
+      (error "Org-pad: bad orPd format byte: %S" format))
     (let* ((chunks (org-pad--png-chunks png-bytes))
            (iend (seq-find (lambda (c) (string= (plist-get c :type) "IEND")) chunks)))
-      (unless iend (error "org-pad: PNG has no IEND chunk"))
+      (unless iend (error "Org-pad: PNG has no IEND chunk"))
       (let* ((iend-start (plist-get iend :chunk-start))
              (data (concat (unibyte-string format) drawing-bytes))
              (new-chunk (org-pad--png-make-chunk org-pad--png-chunk-type data))
@@ -795,7 +860,7 @@ NOTE: v1 returned BYTES directly.  Callers wanting only the bytes should use
     (when orpd
       (let ((start (plist-get orpd :data-start))
             (dlen (plist-get orpd :data-len)))
-        (when (< dlen 1) (error "org-pad: orPd chunk is empty (no format byte)"))
+        (when (< dlen 1) (error "Org-pad: orPd chunk is empty (no format byte)"))
         (cons (aref png-bytes start)
               (substring png-bytes (1+ start) (+ start dlen)))))))
 
@@ -870,9 +935,9 @@ string passes through verbatim.  Always a non-empty string so the field is stabl
 
 (defcustom org-pad-client 'native
   "Which drawing client `org-pad-draw' targets for a NEW figure.
-  `native' (default) — push a session to the iPad app (long-poll flow).
-  `web'    — open the full-featured browser canvas at GET /canvas.
-  `ask'    — prompt each time.
+`native' (default) pushes a session to the iPad app (long-poll flow);
+`web' opens the full-featured browser canvas at GET /canvas;
+`ask' prompts each time.
 An EDIT of an existing figure ignores this and routes by the figure's embedded
 chunk FORMAT: 0x02 -> web, 0x01 -> native."
   :type '(choice (const :tag "Native iPad app" native)
@@ -901,7 +966,7 @@ DEFAULT overrides `org-pad-client'.  Returns `native' or `web'."
     (pcase c
       ('web 'web)
       ('native 'native)
-      ('ask (if (y-or-n-p "org-pad: use the web canvas? (n = native iPad) ")
+      ('ask (if (y-or-n-p "Org-pad: use the web canvas (n = native iPad)?")
                 'web 'native))
       (_ 'native))))
 
@@ -982,6 +1047,7 @@ FORMAT defaults to `org-pad-format-pkdrawing' for byte-identical v1 behaviour."
 ;; Thread FORMAT through the two result writers (redefinitions add optional arg).
 (defun org-pad-insert-new-figure (session png-bytes drawing-bytes &optional format)
   "Handle a `new'-mode SESSION result: write file (with FORMAT), insert link.
+PNG-BYTES is the exported PNG and DRAWING-BYTES the strokes to embed.
 FORMAT defaults to PKDrawing.  Behaviour otherwise matches v1."
   (let* ((format (or format org-pad-format-pkdrawing))
          (marker (org-pad-session-marker session))
@@ -1013,7 +1079,9 @@ FORMAT defaults to PKDrawing.  Behaviour otherwise matches v1."
           file)))))
 
 (defun org-pad-overwrite-figure (session png-bytes drawing-bytes &optional format)
-  "Handle an `edit'-mode SESSION result: overwrite in place with FORMAT.  Return path."
+  "Handle an `edit'-mode SESSION result: overwrite in place with FORMAT.
+PNG-BYTES is the exported PNG and DRAWING-BYTES the strokes to embed.
+Return path."
   (let ((file (org-pad-session-file session))
         (format (or format org-pad-format-pkdrawing)))
     (org-pad--write-png file png-bytes drawing-bytes format)
@@ -1022,6 +1090,7 @@ FORMAT defaults to PKDrawing.  Behaviour otherwise matches v1."
 
 (defun org-pad--handle-result (req)
   "POST /result: decode png+drawing, embed with the requested FORMAT, complete.
+REQ is the parsed request plist.
 Body: {session_id, png:base64, drawing:base64, format?:\"web\"|\"pkdrawing\"}.
 When \"format\" is \"web\", the strokes are embedded as an orPd chunk with the
 0x02 format byte so the figure re-edits back to the web canvas."
@@ -1082,7 +1151,8 @@ QUERY is the raw part after `?' (may be nil).  Values are URL-decoded."
 (cl-defun org-pad--canvas-config (session-id token mode background web-json
                                              &key name result-url cancel-url)
   "Return the injected JS config block string for the web canvas.
-Defines window.ORGPAD_CONFIG = {...}.  Field names are the exact contract the
+SESSION-ID, TOKEN, MODE, BACKGROUND, WEB-JSON and NAME populate the config
+fields.  Defines window.ORGPAD_CONFIG = {...}.  Field names are the exact contract the
 shipped web/canvas.html reads: `session_id', `token', `mode', `name',
 `background', `resultUrl', `drawing', plus `format' (\"web\"), and the
 convenience aliases `result_path'/`cancel_path'/`token_header'.
@@ -1129,6 +1199,7 @@ agent ships the real full-featured web/canvas.html."
 (cl-defun org-pad--canvas-html (session-id token mode background web-json
                                            &key name result-url cancel-url)
   "Return the full web-canvas HTML with the config block injected.
+SESSION-ID, TOKEN, MODE, BACKGROUND and WEB-JSON populate the config block.
 Reads `org-pad-web-canvas-file' when present, else a placeholder page.  The
 config <script> is injected just before </head> (or prepended if no </head>).
 NAME/RESULT-URL/CANCEL-URL are threaded into the config block."
@@ -1149,6 +1220,7 @@ NAME/RESULT-URL/CANCEL-URL are threaded into the config block."
 
 (defun org-pad--handle-canvas (req)
   "GET /canvas (and /web): serve the web canvas page.
+REQ is the parsed request plist.
 
 The page is static (HTML + JS) and is served unconditionally: the sensitive
 endpoints it calls (/session, /result, /cancel) stay token-gated server-side,
@@ -1194,7 +1266,8 @@ page boots as a receiver."
                         ("Pragma" . "no-cache")))))
 
 (defun org-pad--canvas-url (host session-id token)
-  "Build the http://HOST/canvas?session=..&token=.. URL string."
+  "Build the http://HOST/canvas?session=..&token=.. URL string.
+SESSION-ID and TOKEN are URL-encoded into the query."
   (format "http://%s/canvas?session=%s&token=%s"
           host
           (url-hexify-string (or session-id ""))
@@ -1239,7 +1312,7 @@ the Mac's IP changing, so you never have to re-open a new address."
 By default this does NOT open a browser on the Emacs host — a receiver tab kept
 open on the iPad long-polls and picks the session up.  When
 `org-pad-web-open-function' is non-nil (opt-in), ALSO open the per-session URL
-on this machine using the first token on file."
+on this machine using TOKEN (or the first token on file when TOKEN is nil)."
   (when (and org-pad-web-open-function (functionp org-pad-web-open-function))
     (let ((tok (or token (car (last (org-pad--load-tokens))))))
       (when (and (stringp tok) (not (string-empty-p tok)))
@@ -1253,6 +1326,7 @@ on this machine using the first token on file."
                " — open a /canvas tab to receive it")))
   session-id)
 
+;;;###autoload
 (defun org-pad-draw ()
   "Draw into the org buffer at point.  On an org-pad figure link, re-edit it.
 NEW figures route by `org-pad-client' (native/web/ask).  EDITs route by the
@@ -1325,6 +1399,7 @@ default client."
       (org-pad-server-stop)
     (org-pad-server-start)))
 
+;;;###autoload (autoload 'org-pad-menu "org-pad" nil t)
 (transient-define-prefix org-pad-menu ()
   "OrgPad command dispatcher."
   [["Draw"
